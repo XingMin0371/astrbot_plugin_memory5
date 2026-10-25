@@ -102,6 +102,10 @@
 - 只想无脑全文记忆、不在乎 Token 的
 - 不想配模型，装完就想完全不用管的——归档质量依赖模型
 
+## 从旧版本升级
+
+第一次启动会自动把旧的 `<数据目录>/memory5/` 和 `<数据目录>/.memory5.key` 迁移到 `plugin_data/astrbot_plugin_memory5/`，旧目录会清空，不需要手动搬。
+
 ## 安装
 
 1. 把 `astrbot_plugin_memory5` 放到 AstrBot 数据目录的 `plugins/` 下
@@ -129,7 +133,7 @@
 ## 数据放在哪
 
 ```
-<数据目录>/memory5/
+<数据目录>/plugin_data/astrbot_plugin_memory5/memory5/
 ├─ group_xxx/ private_xxx/
 │  ├─ core.md important.jsonl remind.jsonl
 │  ├─ daily/*.jsonl raw/*.jsonl
@@ -139,7 +143,7 @@
 └─ export_history.json
 ```
 
-密钥在 `<数据目录>/.memory5.key`。
+密钥在 `<数据目录>/plugin_data/astrbot_plugin_memory5/.memory5.key`。
 
 ## 隐私
 
@@ -148,6 +152,9 @@
 - 日记加密落盘
 - 面板走 AstrBot 登录态
 - 备份可校验、可解密
+- 会话、日期、媒体路径都有格式校验，防止路径穿越
+- 面板字段做 HTML 转义，避免存储型 XSS
+- 上传只接受常见图片扩展名
 
 ## 说点实话
 

@@ -23,6 +23,7 @@ import base64
 import json
 import os
 import secrets
+import shutil
 import time
 from collections import OrderedDict
 
@@ -54,7 +55,50 @@ def guess_data_dir() -> str:
 
 
 DATA_DIR = guess_data_dir()
-KEY_PATH = os.environ.get("MEMORY5_KEY_FILE", os.path.join(DATA_DIR, ".memory5.key"))
+# 所有持久化文件都放在 data/plugin_data/<插件名>/ 下
+PLUGIN_DATA_DIR = os.environ.get(
+    "MEMORY5_PLUGIN_DIR",
+    os.path.join(DATA_DIR, "plugin_data", "astrbot_plugin_memory5"),
+)
+KEY_PATH = os.environ.get("MEMORY5_KEY_FILE", os.path.join(PLUGIN_DATA_DIR, ".memory5.key"))
+MEM_ROOT = os.path.join(PLUGIN_DATA_DIR, "memory5")
+
+
+def migrate_legacy_layout() -> int:
+    """把旧版放在数据根目录的日记与密钥迁移到 plugin_data/<插件名>/。"""
+    moved = 0
+    try:
+        os.makedirs(MEM_ROOT, exist_ok=True)
+    except OSError:
+        return 0
+    old_root = os.path.join(DATA_DIR, "memory5")
+    if os.path.isdir(old_root) and os.path.abspath(old_root) != os.path.abspath(MEM_ROOT):
+        for name in os.listdir(old_root):
+            src = os.path.join(old_root, name)
+            dst = os.path.join(MEM_ROOT, name)
+            if os.path.exists(dst):
+                continue
+            try:
+                shutil.move(src, dst)
+                moved += 1
+            except OSError:
+                continue
+        try:
+            os.rmdir(old_root)
+        except OSError:
+            pass
+    for suffix in ("", ".old", ".next", ".invalid"):
+        old_key = os.path.join(DATA_DIR, ".memory5.key" + suffix)
+        new_key = KEY_PATH + suffix
+        if os.path.exists(old_key) and not os.path.exists(new_key):
+            try:
+                shutil.move(old_key, new_key)
+                moved += 1
+            except OSError:
+                continue
+    return moved
+
+
 
 
 class CryptoError(RuntimeError):
@@ -499,7 +543,7 @@ def cache_entries(limit: int = 50) -> list[dict]:
     out = []
     for path, size in items[:limit]:
         try:
-            name = os.path.relpath(path, DATA_DIR)
+            name = os.path.relpath(path, MEM_ROOT)
         except ValueError:
             name = os.path.basename(path)
         out.append({"name": name, "bytes": size})
@@ -513,7 +557,7 @@ def cache_by_scope() -> list[dict]:
         if not os.path.exists(path):
             continue  # 文件已删除，不再计入
         try:
-            rel = os.path.relpath(path, os.path.join(DATA_DIR, "memory5"))
+            rel = os.path.relpath(path, MEM_ROOT)
         except ValueError:
             rel = os.path.basename(path)
         parts = rel.split(os.sep)
