@@ -1,0 +1,13 @@
+name: astrbot_plugin_memory5
+display_name: 鱼鱼日记 · 如鱼所书
+short_desc: 如鱼所书——分层日记、按需翻页、面板管理
+desc: 鱼鱼的日记本。每 12 小时把群聊和私聊整理成日记（长期/重要/提醒/普通/低密度），按需注入上下文，提醒到点发送；面板可按 QQ/群号查看、修改、删除日记，删除进回收站 7 天。内置行业敏感词库用于归档脱敏。
+version: v2.1.8
+author: DSH
+repo: https://github.com/XingMin0371/astrbot_plugin_memory5
+astrbot_version: ">=4.29.0"
+tags:
+  - memory
+  - diary
+  - qq
+  - astrbot-plugin

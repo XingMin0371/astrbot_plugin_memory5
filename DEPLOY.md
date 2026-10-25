@@ -1,0 +1,86 @@
+# 鱼鱼日记 · 本地部署说明
+
+纯文本版：同目录 `DEPLOY.txt`
+
+适用：AstrBot 4.x（本地 Python 版或 Docker 版）。插件本身不含任何 shell 脚本，复制目录 + 放密钥即可。
+
+## 一、目录放哪
+
+把整个 `memory5` 文件夹放到 AstrBot 的数据目录下：
+
+```
+<数据目录>/plugins/memory5/
+```
+
+常见数据目录：
+
+| 环境 | 路径 |
+|---|---|
+| Windows 本地版 | `<AstrBot数据目录>/plugins/memory5/` |
+| Linux 本地版 | `/opt/astrbot/data/plugins/memory5/` |
+| Docker | 宿主机挂载的 `data/plugins/memory5/`（容器内 `/AstrBot/data/plugins/memory5`） |
+
+放好后目录里应能看到：
+
+```
+main.py  crypto.py  webui.py  metadata.yaml  _conf_schema.json
+CHANGELOG.md  DEPLOY.md  blocked_words.txt  pages/memory-console/…
+```
+
+## 二、放密钥（二选一）
+
+**恢复已有日记**：把 `memory5.key` 复制为：
+
+```
+<数据目录>/.memory5.key
+```
+
+Linux 下权限设 600。
+
+**全新开始**：不放密钥即可。插件首次启动会自动生成密钥（`<数据目录>/.memory5.key`），
+设置页会显示「已启用」，从此日记以密文保存。
+
+## 三、恢复旧数据（可选）
+
+把原来的 `memory5/` 数据目录整个放到：
+
+```
+<数据目录>/memory5/
+```
+
+其中 `core.md`、`*.jsonl` 都是密文，插件启动后自动解密读取，不需要手动转换。
+
+## 四、启用与验证
+
+1. 启动 AstrBot，进入「插件」页，启用「鱼鱼日记」。
+2. 打开设置页「安全与加密」，应看到：
+   - 加密状态：`已启用（平衡 · AES-256-GCM + HKDF-SHA256 子密钥 · 格式 M5E3）`（或「未启用」）
+   - 密钥路径：`<数据目录>/.memory5.key`
+3. 打开插件面板，能看到范围、日期、各页签。
+4. 群里发 `/记忆查看`，有返回即正常。
+
+## 五、升级
+
+用新版本目录整个覆盖 `<数据目录>/plugins/memory5/`，然后重启 AstrBot。
+配置、密钥、日记数据都不在插件目录里，不会被覆盖。
+
+## 六、卸载
+
+1. 在插件页停用并删除「鱼鱼日记」。
+2. 视需要删除 `<数据目录>/memory5/`（日记）与 `.memory5.key`（密钥）。
+   **删密钥后加密日记将无法恢复。**
+
+## 七、常见问题
+
+| 现象 | 原因 / 处理 |
+|---|---|
+| 插件列表里没有 | 目录名必须是 `memory5`，且 `metadata.yaml` 在目录第一层 |
+| 面板空白 | 强刷页面（Ctrl+Shift+R）；确认 AstrBot 版本 ≥ 4.29 |
+| 加密状态显示未启用 | 密钥文件读写失败；检查 `<数据目录>` 权限后重启，插件会尝试重新生成 |
+| 备份校验一直「未校验」 | 本地没有宿主机校验脚本，属正常；只影响状态展示 |
+| 密钥丢失、日记打不开 | 设置页「安全与加密 → 重置密钥（丢失记忆）」依次确认三步后重启；旧记忆会移到 `memory5-old-时间戳` |
+| Windows 下无法运行部署脚本 | PowerShell 执行策略限制，用 `deploy.cmd` 或加 `-ExecutionPolicy Bypass` |
+
+## 八、依赖
+
+插件不额外安装 Python 包，使用 AstrBot 自带的 `cryptography`。

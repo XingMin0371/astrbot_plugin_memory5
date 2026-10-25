@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.memory5.key
+.memory5.key.*
+memory5/
+data/
+backup/
+dist/
+.DS_Store
+Thumbs.db

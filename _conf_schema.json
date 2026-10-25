@@ -1,0 +1,545 @@
+{
+  "basic": {
+    "description": "基础",
+    "hint": "总开关、归档、注入。",
+    "type": "object",
+    "items": {
+      "enable": {
+        "description": "总开关",
+        "hint": "关闭后停止采集、归档与注入。",
+        "type": "bool",
+        "default": true
+      },
+      "enable_archive": {
+        "description": "自动归档",
+        "hint": "按归档时间整理聊天记录；关闭后仅使用已有日记。",
+        "type": "bool",
+        "default": true
+      },
+      "enable_inject": {
+        "description": "注入记忆",
+        "hint": "对话时将相关日记注入上下文；关闭后模型无法读取记忆。",
+        "type": "bool",
+        "default": true
+      },
+      "archive_now": {
+        "description": "立即归档一次",
+        "hint": "立即执行一次归档，完成后自动取消勾选。",
+        "type": "bool",
+        "default": false
+      }
+    }
+  },
+  "permission": {
+    "description": "权限",
+    "hint": "谁可以管理，谁的消息不记。",
+    "type": "object",
+    "items": {
+      "admin_qqs": {
+        "description": "管理员 QQ",
+        "hint": "拥有查看全部日记与使用重要级命令的权限。",
+        "type": "list",
+        "default": []
+      },
+      "bot_qqs": {
+        "description": "机器人 QQ",
+        "hint": "机器人自身账号，用于识别自身消息。",
+        "type": "list",
+        "default": []
+      },
+      "blacklist_qqs": {
+        "description": "黑名单 QQ",
+        "hint": "该名单内账号的消息不会被记录。",
+        "type": "list",
+        "default": []
+      }
+    }
+  },
+  "archive": {
+    "description": "归档",
+    "hint": "什么时候整理、记录哪些会话、通知发到哪。",
+    "type": "object",
+    "items": {
+      "extract_times": {
+        "description": "归档时间",
+        "hint": "每日执行归档的时刻，24 小时制，多个时间以逗号分隔。",
+        "type": "string",
+        "default": "04:05,16:05"
+      },
+      "write_scopes": {
+        "description": "记录的会话",
+        "hint": "需要归档的会话，格式 group:群号 或 private:QQ号。",
+        "type": "list",
+        "default": []
+      },
+      "notify_scopes": {
+        "description": "归档通知发到",
+        "hint": "归档完成后向这些会话发送提示。",
+        "type": "list",
+        "default": []
+      },
+      "notify_quiet_ranges": {
+        "description": "免打扰时段",
+        "hint": "该时段内不发送归档通知，多个时段以逗号分隔。",
+        "type": "string",
+        "default": "00:00-08:00,12:00-14:00"
+      },
+      "notify_max_per_day": {
+        "description": "通知上限（次）",
+        "hint": "每日最多发送的归档通知条数。",
+        "type": "int",
+        "default": 2
+      }
+    }
+  },
+  "inject": {
+    "description": "注入与预算",
+    "hint": "每轮对话带多少记忆。",
+    "type": "object",
+    "items": {
+      "budget": {
+        "description": "每轮注入总预算",
+        "hint": "长期、共享、重要的合计上限。",
+        "type": "object",
+        "items": {
+          "inject_budget_chars": {
+            "description": "总预算（字符）",
+            "hint": "长期、共享与重要记忆的合计上限，超出时按 重要 → 共享 → 长期 的顺序裁剪。",
+            "type": "int",
+            "default": 3600
+          }
+        }
+      },
+      "memory": {
+        "description": "记忆预算",
+        "hint": "长期和重要各自的额度。",
+        "type": "object",
+        "items": {
+          "core_max_chars": {
+            "description": "长期记忆上限（字符）",
+            "hint": "超出后按时间顺序丢弃最旧条目。",
+            "type": "int",
+            "default": 2000
+          },
+          "random_min": {
+            "description": "随机注入条数（条）",
+            "hint": "在近期记忆中至少随机选取的条数。",
+            "type": "int",
+            "default": 3
+          },
+          "important_max_chars": {
+            "description": "重要上限（字符）",
+            "hint": "重要段的字符预算，0 表示不限制。",
+            "type": "int",
+            "default": 0
+          }
+        }
+      },
+      "shared": {
+        "description": "共享记忆预算",
+        "hint": "跨会话共享的身份、称呼、关系。",
+        "type": "object",
+        "items": {
+          "identity_max": {
+            "description": "共享身份条数（条）",
+            "hint": "每个 QQ 最多注入的身份信息条数。",
+            "type": "int",
+            "default": 5
+          },
+          "callname_max": {
+            "description": "共享称呼条数（条）",
+            "hint": "每个 QQ 最多注入的称呼条数。",
+            "type": "int",
+            "default": 5
+          },
+          "shared_relation_max_chars": {
+            "description": "共享关系上限（字符）",
+            "hint": "关系类共享记忆的字符上限。",
+            "type": "int",
+            "default": 600
+          }
+        }
+      },
+      "independent": {
+        "description": "独立预算",
+        "hint": "普通记忆单独计算，不占总预算。",
+        "type": "object",
+        "items": {
+          "normal_budget_chars": {
+            "description": "普通记忆预算（字符）",
+            "hint": "普通与低密度记忆单独计算，0 表示不限制。",
+            "type": "int",
+            "default": 1200
+          }
+        }
+      }
+    }
+  },
+  "retention": {
+    "description": "保留与清理",
+    "hint": "各类日记保留多久。",
+    "type": "object",
+    "items": {
+      "keep_normal_days": {
+        "description": "普通保留（天）",
+        "hint": "超过保留期后整天删除。",
+        "type": "int",
+        "default": 7
+      },
+      "low_keep_days": {
+        "description": "低密度保留（天）",
+        "hint": "超过保留期后逐条删除。",
+        "type": "int",
+        "default": 3
+      },
+      "important_keep_days": {
+        "description": "重要保留（天）",
+        "hint": "超过保留期后逐条删除。",
+        "type": "int",
+        "default": 30
+      },
+      "raw_keep_days": {
+        "description": "原始消息保留（天）",
+        "hint": "归档用的原始聊天记录保留多久。",
+        "type": "int",
+        "default": 30
+      },
+      "dedupe_enable": {
+        "description": "跨标签去重",
+        "hint": "同一件事只保留优先级最高的一条。",
+        "type": "bool",
+        "default": true
+      }
+    }
+  },
+  "grading": {
+    "description": "分级阈值",
+    "hint": "什么算重要、什么进长期、什么算低密度。",
+    "type": "object",
+    "items": {
+      "important": {
+        "description": "重要",
+        "hint": "三个条件同时满足才算重要。",
+        "type": "object",
+        "items": {
+          "important_stability": {
+            "description": "稳定度阈值",
+            "hint": "达到几才算重要：1 瞬时，2 中期，3 长期。",
+            "type": "int",
+            "default": 3
+          },
+          "important_impact": {
+            "description": "影响力阈值",
+            "hint": "达到几才算重要：1 低，2 中，3 高。",
+            "type": "int",
+            "default": 2
+          },
+          "important_info": {
+            "description": "信息量阈值",
+            "hint": "达到几才算重要：0 无，1 低，2 中，3 高。",
+            "type": "int",
+            "default": 2
+          }
+        }
+      },
+      "core": {
+        "description": "进长期",
+        "hint": "重要记忆里满足条件才写入长期。",
+        "type": "object",
+        "items": {
+          "core_impact": {
+            "description": "进长期的影响力阈值",
+            "hint": "达到几才写入长期记忆。",
+            "type": "int",
+            "default": 3
+          },
+          "core_info": {
+            "description": "进长期的信息量阈值",
+            "hint": "达到几才写入长期记忆。",
+            "type": "int",
+            "default": 3
+          }
+        }
+      },
+      "low": {
+        "description": "低密度",
+        "hint": "信息少、影响小的归到这里。",
+        "type": "object",
+        "items": {
+          "low_info": {
+            "description": "低密度信息量阈值",
+            "hint": "信息量不高于几算低密度。",
+            "type": "int",
+            "default": 1
+          },
+          "low_impact": {
+            "description": "低密度影响力阈值",
+            "hint": "影响力不高于几算低密度。",
+            "type": "int",
+            "default": 2
+          }
+        }
+      }
+    }
+  },
+  "remind": {
+    "description": "提醒",
+    "hint": "什么时候提醒、提醒几次、过期怎么处理。",
+    "type": "object",
+    "items": {
+      "trigger": {
+        "description": "触发",
+        "hint": "提前多久开始、一共几次。",
+        "type": "object",
+        "items": {
+          "remind_lead_minutes": {
+            "description": "提前量（分钟）",
+            "hint": "到期前开始提醒的分钟数。",
+            "type": "int",
+            "default": 30
+          },
+          "remind_count": {
+            "description": "提醒次数（次）",
+            "hint": "单条提醒的发送次数，最后一次为准点。",
+            "type": "int",
+            "default": 2
+          }
+        }
+      },
+      "send": {
+        "description": "发送",
+        "hint": "错过后是否补发。",
+        "type": "object",
+        "items": {
+          "remind_grace_minutes": {
+            "description": "补发宽限（分钟）",
+            "hint": "错过触发点后的补发时限。",
+            "type": "int",
+            "default": 5
+          }
+        }
+      },
+      "inject": {
+        "description": "注入",
+        "hint": "提醒进入上下文的窗口与数量。",
+        "type": "object",
+        "items": {
+          "remind_inject_margin_minutes": {
+            "description": "注入窗口（分钟）",
+            "hint": "仅在触发点前后该时间范围内注入提醒。",
+            "type": "int",
+            "default": 5
+          },
+          "remind_max_per_qq": {
+            "description": "每 QQ 注入条数（条）",
+            "hint": "每个 QQ 同时注入的提醒上限。",
+            "type": "int",
+            "default": 5
+          }
+        }
+      },
+      "cleanup": {
+        "description": "清理",
+        "hint": "到期后如何处理。",
+        "type": "object",
+        "items": {
+          "remind_purge_minutes": {
+            "description": "到期后清理（分钟）",
+            "hint": "到期后保留多久再删除。",
+            "type": "int",
+            "default": 5
+          },
+          "remind_fallback_enable": {
+            "description": "过期后回落",
+            "hint": "按内容回落为重要或普通；信息量不足时直接删除。",
+            "type": "bool",
+            "default": true
+          }
+        }
+      },
+      "record": {
+        "description": "记录",
+        "hint": "多远的提醒才值得记。",
+        "type": "object",
+        "items": {
+          "remind_max_future_days": {
+            "description": "最远记录（天）",
+            "hint": "超过该天数的提醒不予记录。",
+            "type": "int",
+            "default": 14
+          }
+        }
+      }
+    }
+  },
+  "filter": {
+    "description": "内容过滤",
+    "hint": "归档前的脱敏。",
+    "type": "object",
+    "items": {
+      "extra_blocked_words": {
+        "description": "额外屏蔽词",
+        "hint": "内置词表见插件目录 blocked_words.txt（启动后会显示实际条数与路径）；此处补充额外屏蔽词，归档命中时会被替换。",
+        "type": "list",
+        "default": []
+      }
+    }
+  },
+  "media": {
+    "description": "富媒体",
+    "hint": "定时任务里图片、语音、视频的大小限制。",
+    "type": "object",
+    "items": {
+      "single": {
+        "description": "单文件上限",
+        "hint": "每个文件最大多少 MB。",
+        "type": "object",
+        "items": {
+          "text_limit_mb": {
+            "description": "文字（MB）",
+            "hint": "单个文字任务的正文上限。",
+            "type": "int",
+            "default": 1
+          },
+          "image_limit_mb": {
+            "description": "图片（MB）",
+            "hint": "单张图片的大小上限。",
+            "type": "int",
+            "default": 5
+          },
+          "voice_limit_mb": {
+            "description": "语音（MB）",
+            "hint": "单条语音的大小上限。",
+            "type": "int",
+            "default": 10
+          },
+          "video_limit_mb": {
+            "description": "视频（MB）",
+            "hint": "单个视频的大小上限。",
+            "type": "int",
+            "default": 100
+          }
+        }
+      },
+      "total": {
+        "description": "总量上限",
+        "hint": "同类文件合计最大多少 MB。",
+        "type": "object",
+        "items": {
+          "text_total_mb": {
+            "description": "文字总量（MB）",
+            "hint": "全部任务正文的合计上限。",
+            "type": "int",
+            "default": 30
+          },
+          "image_total_mb": {
+            "description": "图片总量（MB）",
+            "hint": "全部图片的合计上限。",
+            "type": "int",
+            "default": 150
+          },
+          "voice_total_mb": {
+            "description": "语音总量（MB）",
+            "hint": "全部语音的合计上限。",
+            "type": "int",
+            "default": 300
+          },
+          "video_total_mb": {
+            "description": "视频总量（MB）",
+            "hint": "全部视频的合计上限。",
+            "type": "int",
+            "default": 1024
+          }
+        }
+      },
+      "repeat": {
+        "description": "重复任务限制",
+        "hint": "大文件不允许高频重复发送。",
+        "type": "object",
+        "items": {
+          "repeat_media_limit_mb": {
+            "description": "大文件阈值（MB）",
+            "hint": "超过该大小的媒体不可设为每周；按天发送需限制为 1~7 天。",
+            "type": "int",
+            "default": 30
+          }
+        }
+      }
+    }
+  },
+  "security": {
+    "description": "安全与加密",
+    "hint": "加密强度、密钥、备份校验、状态面板。",
+    "type": "object",
+    "items": {
+      "crypto_mode": {
+        "description": "加密强度",
+        "hint": "高性能最快，平衡推荐，安全最稳；切换后自动重加密全部日记。",
+        "type": "string",
+        "options": [
+          "高性能",
+          "平衡",
+          "安全"
+        ],
+        "default": "平衡"
+      },
+      "status": {
+        "description": "加密状态",
+        "hint": "由插件自动写入，仅供查看。",
+        "type": "string",
+        "default": "启动后自动显示"
+      },
+      "key_path": {
+        "description": "密钥路径",
+        "hint": "插件读取密钥文件的位置，仅供查看。",
+        "type": "string",
+        "default": "启动后自动显示"
+      },
+      "key_rotate_period": {
+        "description": "密钥轮换",
+        "hint": "到期后自动更换密钥并重加密全部日记，默认关闭。",
+        "type": "string",
+        "options": [
+          "关闭",
+          "半天",
+          "一天",
+          "一周",
+          "一月",
+          "一年"
+        ],
+        "default": "关闭"
+      },
+      "backup_verify_period": {
+        "description": "备份校验周期",
+        "hint": "宿主机脚本按该周期校验最近备份是否可解密。",
+        "type": "string",
+        "options": [
+          "不校验",
+          "1天",
+          "3天",
+          "7天",
+          "30天"
+        ],
+        "default": "7天"
+      },
+      "health_panel": {
+        "description": "显示运行状态",
+        "hint": "控制面板「运行状态」按钮是否可用。",
+        "type": "bool",
+        "default": true
+      },
+      "reset_key": {
+        "description": "重置密钥（丢失记忆）",
+        "hint": "仅在密钥不可用时使用：需依次选择第 1、2、3 步，每一步保存一次；第 3 步后重启生效，旧记忆会被移到 memory5-old-时间戳 目录，且无法再用新密钥解密。",
+        "type": "string",
+        "options": [
+          "不重置",
+          "第 1 步：确认重置",
+          "第 2 步：再次确认",
+          "第 3 步：执行重置"
+        ],
+        "default": "不重置"
+      }
+    }
+  }
+}
