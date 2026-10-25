@@ -931,7 +931,7 @@ class Memory5WebUI(_TasksMixin):
         scope = (request.args.get("scope") or "").strip()
         tab = (request.args.get("tab") or "core").strip()
         day = (request.args.get("day") or "").strip()
-        query = (request.args.get("q") or "").strip()
+        query = (request.args.get("q") or "").strip()[:100]
         if not scope:
             raise ValueError("缺少 scope")
 
