@@ -6,19 +6,19 @@
 
 ## 一、目录放哪
 
-把整个 `memory5` 文件夹放到 AstrBot 的数据目录下：
+把整个 `astrbot_plugin_memory5` 文件夹放到 AstrBot 的数据目录下：
 
 ```
-<数据目录>/plugins/memory5/
+<数据目录>/plugins/astrbot_plugin_memory5/
 ```
 
 常见数据目录：
 
 | 环境 | 路径 |
 |---|---|
-| Windows 本地版 | `<AstrBot数据目录>/plugins/memory5/` |
-| Linux 本地版 | `/opt/astrbot/data/plugins/memory5/` |
-| Docker | 宿主机挂载的 `data/plugins/memory5/`（容器内 `/AstrBot/data/plugins/memory5`） |
+| Windows 本地版 | `<AstrBot数据目录>/plugins/astrbot_plugin_memory5/` |
+| Linux 本地版 | `/opt/astrbot/data/plugins/astrbot_plugin_memory5/` |
+| Docker | 宿主机挂载的 `data/plugins/astrbot_plugin_memory5/`（容器内 `/AstrBot/data/plugins/memory5`） |
 
 放好后目录里应能看到：
 
@@ -61,7 +61,7 @@ Linux 下权限设 600。
 
 ## 五、升级
 
-用新版本目录整个覆盖 `<数据目录>/plugins/memory5/`，然后重启 AstrBot。
+用新版本目录整个覆盖 `<数据目录>/plugins/astrbot_plugin_memory5/`，然后重启 AstrBot。
 配置、密钥、日记数据都不在插件目录里，不会被覆盖。
 
 ## 六、卸载
@@ -74,7 +74,7 @@ Linux 下权限设 600。
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| 插件列表里没有 | 目录名必须是 `memory5`，且 `metadata.yaml` 在目录第一层 |
+| 插件列表里没有 | 目录名必须是 `astrbot_plugin_memory5`，且 `metadata.yaml` 在目录第一层 |
 | 面板空白 | 强刷页面（Ctrl+Shift+R）；确认 AstrBot 版本 ≥ 4.29 |
 | 加密状态显示未启用 | 密钥文件读写失败；检查 `<数据目录>` 权限后重启，插件会尝试重新生成 |
 | 备份校验一直「未校验」 | 本地没有宿主机校验脚本，属正常；只影响状态展示 |
