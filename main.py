@@ -30,6 +30,9 @@ from astrbot.api.star import Context, Star, register
 try:  # 包内正常加载
     from .crypto import (
         DATA_DIR,
+        MEM_ROOT,
+        PLUGIN_DATA_DIR,
+        migrate_legacy_layout,
         KEY_PATH,
         CryptoError,
         MODE_LABELS,
@@ -60,6 +63,9 @@ except ImportError:  # 单文件方式加载（本地测试）
     _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from crypto import (  # type: ignore[no-redef]
         DATA_DIR,
+        MEM_ROOT,
+        PLUGIN_DATA_DIR,
+        migrate_legacy_layout,
         KEY_PATH,
         CryptoError,
         MODE_LABELS,
@@ -105,21 +111,25 @@ try:
 except Exception:  # pragma: no cover
     TextPart = None  # type: ignore[assignment]
 
-MEM_ROOT = os.path.join(DATA_DIR, "memory5")
 DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
 TZ = timezone(timedelta(hours=8))
 
 
+_SCOPE_RE = re.compile(r"^(group|private):\d{5,20}$")
+
+
 def scope_dir(scope: str) -> str:
     """group:123 -> <MEM_ROOT>/group_123。"""
-    return os.path.join(MEM_ROOT, scope.replace(":", "_"))
+    if not _SCOPE_RE.match(str(scope)):
+        raise ValueError("非法 scope")
+    return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
 def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
 
-VERSION = "2.1.8"
+VERSION = "2.1.10"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -715,7 +725,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.8")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.10")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -1216,8 +1226,7 @@ class Memory5(Star):
             if bool(self._get("dedupe_enable", True)):
                 removed = dedupe_scope(scope)
                 if removed:
-                    preview = "；".join(f"{d['tier']}:{d['text'][:16]}" for d in removed[:5])
-                    logger.info(f"memory5: {scope} 跨标签去重 {len(removed)} 条（{preview}）")
+                    logger.info(f"memory5: {scope} 跨标签去重 {len(removed)} 条")
             try:
                 renumbered = renumber_scope(scope)
                 if renumbered:
@@ -1468,12 +1477,7 @@ class Memory5(Star):
         except Exception as exc:  # pragma: no cover
             logger.warning(f"memory5: 内存里复位归档开关失败 {type(exc).__name__}: {exc}")
 
-        path = os.path.join(DATA_DIR, "config", "memory5_config.json")
-        try:
-            with open(path, encoding="utf-8-sig") as fh:
-                data = json.load(fh)
-        except (OSError, ValueError):
-            return True
+        return True
         basic = data.get("basic") or {}
         basic["archive_now"] = False
         data["basic"] = basic
@@ -1912,6 +1916,12 @@ class Memory5(Star):
 
     # --------------------------------------------------------------- init
     async def initialize(self) -> None:
+        try:
+            moved = migrate_legacy_layout()
+            if moved:
+                logger.info(f"memory5: 已迁移 {moved} 个旧文件到 plugin_data/astrbot_plugin_memory5")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"memory5: 旧数据迁移跳过 {type(exc).__name__}: {exc}")
         ensure_dir(MEM_ROOT)
         key, generated = ensure_key()
         if generated and key is not None:

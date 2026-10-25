@@ -16,14 +16,14 @@ from quart import jsonify, request
 from astrbot.api import logger
 
 try:  # 数据目录与加密层保持一致
-    from .crypto import DATA_DIR
+    from .crypto import MEM_ROOT
 except ImportError:  # pragma: no cover - 单文件加载
     try:
-        from crypto import DATA_DIR  # type: ignore[no-redef]
+        from crypto import MEM_ROOT  # type: ignore[no-redef]
     except ImportError:
-        DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        MEM_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "plugin_data", "astrbot_plugin_memory5", "memory5")
 
-MEM_ROOT = os.path.join(DATA_DIR, "memory5")
 TRASH_DIR = os.path.join(MEM_ROOT, "trash")
 TRASH_TTL_DAYS = 7
 
@@ -32,8 +32,14 @@ def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
+_SCOPE_RE = re.compile(r"^(group|private):\d{5,20}$")
+_DAY_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})$")
+
+
 def scope_dir(scope: str) -> str:
-    return os.path.join(MEM_ROOT, scope.replace(":", "_"))
+    if not _SCOPE_RE.match(str(scope)):
+        raise ValueError("非法 scope")
+    return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
 # 统一走 crypto 的加密读写，别让面板绕过加密层
@@ -235,7 +241,10 @@ class _TasksMixin:
             repeat_days = 0
         media_name = str(body.get("media", "")).strip()
         if media_name:
+            media_name = os.path.basename(media_name)
             path = os.path.join(MEM_ROOT, "media", media_name)
+            if not os.path.abspath(path).startswith(os.path.abspath(os.path.join(MEM_ROOT, "media"))):
+                raise ValueError("非法媒体路径")
             repeat_limit = self.plugin._int_raw("repeat_media_limit_mb", 30)
             if repeat_limit > 0 and os.path.isfile(path) and os.path.getsize(path) > repeat_limit * 1024 * 1024:
                 if kind == "weekly":

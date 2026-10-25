@@ -259,6 +259,12 @@ function currentDay() {
   return $("day") ? $("day").value : "";
 }
 
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"\']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "\'": "&#39;",
+  }[ch]));
+}
+
 function tagClass(tag) {
   return ["长期", "重要", "提醒", "低密度"].includes(tag) ? tag : "";
 }
@@ -281,11 +287,11 @@ function renderEntries(rows, source) {
     const meta = document.createElement("div");
     meta.className = "meta";
     meta.innerHTML =
-      `<span>#${row.seq ?? ""}</span>` +
-      `<span>${row.subject || ""}</span>` +
-      `<span>${row.topic || ""}</span>` +
-      `<span>${row.date || ""}</span>` +
-      (row.due ? `<span>到期 ${row.due}</span>` : "");
+      `<span>#${esc(row.seq ?? "")}</span>` +
+      `<span>${esc(row.subject || "")}</span>` +
+      `<span>${esc(row.topic || "")}</span>` +
+      `<span>${esc(row.date || "")}</span>` +
+      (row.due ? `<span>到期 ${esc(row.due)}</span>` : "");
     const text = document.createElement("div");
     text.className = "text";
     text.textContent = row.text || "";
