@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>鱼鱼日记</title>
+    <style>
+      html, body { background: #f6f7f9; color: #1c1e21; }
+      body { margin: 0; font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    </style>
+    <link rel="stylesheet" href="./style.css?v=2.1.8" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>鱼鱼日记</h1>
+        <p class="sub">如鱼所书：群聊与私聊的分层日记，按范围查看、修改、删除。</p>
+      </header>
+
+      <section class="row">
+        <label>范围
+          <select id="scope"></select>
+        </label>
+        <label>日期
+          <input id="day" type="date" />
+        </label>
+        <label><input id="allDates" type="checkbox" /> 全部</label>
+        <button id="reload" type="button">刷新</button>
+        <button id="addBtn" type="button" class="hidden">新增</button>
+        <button id="exportBtn" type="button">导出</button>
+        <button id="exportHistoryBtn" type="button">导出历史</button>
+        <button id="healthBtn" type="button">运行状态</button>
+      </section>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="core" type="button">长期记忆</button>
+        <button class="tab" data-tab="important" type="button">重要</button>
+        <button class="tab" data-tab="remind" type="button">提醒</button>
+        <button class="tab" data-tab="normal" type="button">普通</button>
+        <button class="tab" data-tab="low" type="button">低密度</button>
+        <button class="tab" data-tab="aliases" type="button">别名</button>
+        <button class="tab" data-tab="trash" type="button">回收站</button>
+        <button class="tab" data-tab="tasks" type="button">定时</button>
+      </nav>
+
+      <div id="searchRow" class="row hidden">
+        <input id="query" type="search" placeholder="按 QQ 号或内容筛选" />
+        <span id="queryInfo" class="muted"></span>
+      </div>
+      <div id="bulkTop" class="row hidden">
+        <button id="bulkDelete" type="button" class="danger">删除</button>
+        <span id="bulkCount">已选 0 条</span>
+      </div>
+
+      <div id="status" class="status"></div>
+      <div id="list" class="list"></div>
+      <div id="trashBox" class="list hidden"></div>
+
+      <div id="pager" class="pager hidden">
+        <button id="prevPage" type="button">上一页</button>
+        <span id="pageInfo" class="page-info"></span>
+        <button id="nextPage" type="button">下一页</button>
+      </div>
+
+      <div id="bulkBottom" class="row hidden">
+        <button id="bulkAdjust" type="button">批量调整</button>
+        <label class="push-right"><input type="checkbox" id="bulkAll" /> 全选本页</label>
+      </div>
+      <div id="bulkPanel" class="card hidden">
+        <div class="meta" id="bulkPanelCount">已选 0 条</div>
+        <div class="actions">
+          <label><input type="radio" name="bulkLevel" value="重要" /> 重要</label>
+          <label><input type="radio" name="bulkLevel" value="普通" /> 普通</label>
+          <label><input type="radio" name="bulkLevel" value="低密度" /> 低密度</label>
+        </div>
+        <div class="actions">
+          <button id="bulkConfirm" type="button" disabled>请选择等级</button>
+          <button id="bulkCancel" type="button">取消</button>
+        </div>
+      </div>
+
+        <section id="healthCard" class="card health-card hidden">
+          <div class="health-title">运行状态</div>
+          <div id="healthBody" class="health-body"></div>
+        </section>
+
+    </div>
+    <script src="./app.js?v=2.1.8" defer></script>
+  </body>
+</html>
