@@ -110,6 +110,9 @@ def record_umo(scope: str, umo: str) -> None:
         data[scope] = umo
         write_plain_json(_umos_path(), data)
 
+_SYSTEM_MARKERS = ("已确认授权", "管理员授权验证", "管理员权限已移除", "已确认授权：")
+
+
 def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
@@ -928,6 +931,8 @@ class Memory5(Star):
             if not scope or scope not in self.scopes:
                 return
             text = (event.message_str or "").strip()
+            if any(marker in text for marker in _SYSTEM_MARKERS):
+                return
             sender = str(event.get_sender_id())
             self_ids = {str(x) for x in self.bot_qqs()}
             try:
@@ -2035,6 +2040,33 @@ class Memory5(Star):
         logger.warning(f"memory5: 给 {qq} 发送授权消息失败，所有候选会话都不可用")
         return False
 
+
+    def _ensure_owner_memory(self, qq: str) -> None:
+        try:
+            core = read_text(scope_paths(f"private:{qq}")["core"])
+            if str(qq) in core and "的主人" in core:
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        self._write_owner_memory(qq)
+
+    def _write_owner_memory(self, qq: str) -> None:
+        if not str(qq).isdigit():
+            return
+        name = str(self._get("bot_name", "鱼鱼") or "鱼鱼")
+        bots = sorted(self.bot_qqs())
+        bot_qq = bots[0] if bots else ""
+        text = f"{name}({bot_qq}) 的主人" if bot_qq else f"{name} 的主人"
+        scope = f"private:{qq}"
+        try:
+            ensure_dir(scope_dir(scope))
+            self._write_core(scope, {
+                "topic": "主人", "subject": str(qq), "text": text, "date": day_str(),
+            })
+            logger.info(f"memory5: 已在长期记忆记录 {qq} 是 {name} 的主人")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"memory5: 写主人长期记忆失败 {type(exc).__name__}: {exc}")
+
     async def _admin_sync(self) -> None:
         desired = set()
         raw = self._get("admin_qqs", [])
@@ -2072,11 +2104,18 @@ class Memory5(Star):
         state["authorized"] = authorized
         state["pending"] = pending
         self._save_admin_state(state)
+        for qq in authorized:
+            self._ensure_owner_memory(qq)
 
     async def _admin_auth_listener(self, event: AstrMessageEvent) -> None:
         text = (event.message_str or "").strip()
         if "已确认授权" not in text:
             return
+        event.stop_event()
+        try:
+            event.should_call_llm(False)
+        except Exception:  # noqa: BLE001
+            pass
         sender = str(event.get_sender_id())
         if not getattr(event, "is_private_chat", lambda: True)():
             return
@@ -2091,6 +2130,7 @@ class Memory5(Star):
         state["pending"] = pending
         self._save_admin_state(state)
         logger.info(f"memory5: {sender} 已确认管理员授权")
+        self._write_owner_memory(sender)
         await self._send_private(sender, "已确认授权：这个 QQ 现在是鱼鱼日记的管理员。")
 
     async def _admin_loop(self) -> None:

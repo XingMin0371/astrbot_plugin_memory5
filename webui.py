@@ -706,7 +706,24 @@ class _TasksMixin:
 
         data_root = os.path.dirname(os.path.dirname(os.path.dirname(MEM_ROOT)))
         add("数据目录可写", os.access(MEM_ROOT, os.W_OK), MEM_ROOT)
-        add("密钥存在", enc_key() is not None, KEY_PATH if "KEY_PATH" in globals() else "")
+        try:
+            from .main import VERSION
+            add("版本", True, VERSION)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from .crypto import crypto_mode, key_age_seconds
+            add("加密模式", True, crypto_mode())
+            add("密钥年龄", True, f"{key_age_seconds() / 3600:.1f}h")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            add("会话数", True, str(len(getattr(self.plugin, "scopes", []))))
+            state = self.plugin._admin_state()
+            add("管理员", True, f"已授权 {len(state.get('authorized', []))} / 待确认 {len(state.get('pending', {}))}")
+        except Exception:  # noqa: BLE001
+            pass
+        add("密钥存在", enc_key() is not None, "")
         probe = os.path.join(MEM_ROOT, ".selfcheck.tmp")
         try:
             write_text(probe, "selfcheck")
