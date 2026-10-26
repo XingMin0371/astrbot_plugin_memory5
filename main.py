@@ -147,7 +147,7 @@ def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
 
-VERSION = "2.1.13"
+VERSION = "2.1.12beta1"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -773,7 +773,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.13")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12beta1")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -1989,7 +1989,7 @@ class Memory5(Star):
         try:
             for inst in self.context.platform_manager.platform_insts:
                 meta = inst.meta()
-                name = getattr(meta, "name", "") or getattr(inst, "name", "")
+                name = getattr(meta, "id", "") or getattr(meta, "name", "") or getattr(inst, "name", "")
                 if name:
                     names.append(str(name))
         except Exception:  # noqa: BLE001
@@ -1998,11 +1998,10 @@ class Memory5(Star):
 
     def _umo_candidates(self, scope: str) -> list[str]:
         out = []
-        known = load_umos().get(str(scope))
-        if known:
-            out.append(known)
         platform = os.environ.get("MEMORY5_PLATFORM", "").strip()
-        for name in self._platform_names() + ([platform] if platform else []) + ["aiocqhttp", "snowluma"]:
+        known = load_umos().get(str(scope))
+        names = self._platform_names() + ([platform] if platform else [])
+        for name in names + ["snowluma", "aiocqhttp"]:
             if not name:
                 continue
             if scope.startswith("group:"):
@@ -2013,6 +2012,8 @@ class Memory5(Star):
                 continue
             if cand not in out:
                 out.append(cand)
+        if known and known not in out:
+            out.append(known)
         return out
 
     async def _send_private(self, qq: str, text: str) -> bool:
@@ -2023,7 +2024,9 @@ class Memory5(Star):
         for umo in candidates:
             try:
                 chain = MessageChain().message(text)
-                await asyncio.wait_for(self.context.send_message(umo, chain), timeout=15)
+                result = await asyncio.wait_for(self.context.send_message(umo, chain), timeout=15)
+                if result is False:
+                    raise RuntimeError("send_message 返回 False")
                 if load_umos().get(f"private:{qq}") != umo:
                     record_umo(f"private:{qq}", umo)
                 return True

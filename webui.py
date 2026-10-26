@@ -691,6 +691,64 @@ class _TasksMixin:
         rows = read_json(os.path.join(MEM_ROOT, "export_history.json"), []) or []
         return jsonify({"status": "ok", "data": list(reversed(rows[-20:]))})
 
+
+    async def selfcheck(self):
+        """跑一遍关键链路，把结果写到插件数据目录，返回日志路径。"""
+        from .crypto import enc_key, read_text, write_text
+
+        lines = []
+        ok = True
+
+        def add(name, passed, detail=""):
+            nonlocal ok
+            ok = ok and passed
+            lines.append(f"[{'OK' if passed else 'FAIL'}] {name} {detail}".strip())
+
+        data_root = os.path.dirname(os.path.dirname(MEM_ROOT))
+        add("数据目录可写", os.access(MEM_ROOT, os.W_OK), MEM_ROOT)
+        add("密钥存在", enc_key() is not None, KEY_PATH if "KEY_PATH" in globals() else "")
+        probe = os.path.join(MEM_ROOT, ".selfcheck.tmp")
+        try:
+            write_text(probe, "selfcheck")
+            good = read_text(probe) == "selfcheck"
+            add("加密读写", good)
+        except Exception as exc:  # noqa: BLE001
+            add("加密读写", False, type(exc).__name__)
+        finally:
+            try:
+                os.remove(probe)
+            except OSError:
+                pass
+        try:
+            import sqlite3
+            db = os.path.join(data_root, "data_v4.db")
+            db_uri = f"file:{db}?mode=ro"
+            if os.name == "nt":
+                db_uri = "file:/" + db.replace("\\", "/") + "?mode=ro"
+            con = sqlite3.connect(db_uri, uri=True, timeout=5)
+            con.execute("select 1").fetchone()
+            con.close()
+            add("数据库只读", True)
+        except Exception as exc:  # noqa: BLE001
+            add("数据库只读", False, type(exc).__name__)
+        try:
+            provider = self.plugin.context.get_using_provider()
+            add("模型提供商", provider is not None)
+        except Exception as exc:  # noqa: BLE001
+            add("模型提供商", False, type(exc).__name__)
+        try:
+            usage = shutil.disk_usage(MEM_ROOT)
+            add("磁盘剩余", usage.free > 50 * 1024 * 1024, f"{usage.free // (1024 * 1024)}MB")
+        except Exception as exc:  # noqa: BLE001
+            add("磁盘剩余", False, type(exc).__name__)
+
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        log_path = os.path.join(os.path.dirname(MEM_ROOT), f"selfcheck-{stamp}.log")
+        with open(log_path, "w", encoding="utf-8") as fh:
+            fh.write("memory5 自检 " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+            fh.write("\n".join(lines) + "\n")
+        return jsonify({"status": "ok", "data": {"ok": ok, "path": log_path, "lines": lines}})
+
     async def health(self):
         from .main import VERSION, refresh_index
 
@@ -784,6 +842,7 @@ class Memory5WebUI(_TasksMixin):
             ("/memory5/aliases-update", self.aliases_update, ["POST"], "修改别名"),
             ("/memory5/aliases-delete", self.aliases_delete, ["POST"], "删除别名"),
             ("/memory5/health", self.health, ["GET"], "健康状态"),
+            ("/memory5/selfcheck", self.selfcheck, ["POST"], "自检"),
             ("/memory5/export-history", self.export_history, ["GET"], "导出历史"),
             ("/memory5/export-history-clear", self.export_history_clear, ["POST"], "清空导出历史"),
             ("/memory5/trash-clear", self.trash_clear, ["POST"], "清空回收站"),

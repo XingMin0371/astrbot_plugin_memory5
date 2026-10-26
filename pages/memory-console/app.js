@@ -1047,6 +1047,13 @@ async function boot() {
     btn.textContent = "删除";
     runBulk("delete", btn);
   };
+  $("selfcheckBtn").onclick = async () => {
+    $("selfcheckOut").textContent = "自检中…";
+    const res = await apiPost("selfcheck", {});
+    const data = unwrap(res) || {};
+    const lines = (data.lines || []).join("；");
+    $("selfcheckOut").textContent = `${data.ok ? "自检通过" : "自检异常"} · ${data.path || ""} · ${lines}`;
+  };
   $("healthBtn").onclick = async () => {
     const card = $("healthCard");
     if (!card) return;
