@@ -13,15 +13,37 @@ import asyncio
 import base64
 import difflib
 import json
+import logging
 import os
 import random
+import secrets
 import re
 import shutil
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from astrbot.api import logger
+
+
+class _RelPathFilter(logging.Filter):
+    def filter(self, record):
+        if os.environ.get("MEMORY5_LOG_ABSOLUTE") == "1":
+            return True
+        try:
+            msg = record.getMessage()
+            for key, label in ((MEM_ROOT, "memory5"), (PLUGIN_DATA_DIR, "plugin_data"), (DATA_DIR, "data")):
+                if key:
+                    msg = msg.replace(key + os.sep, label + "/").replace(key, label)
+            record.msg = msg
+            record.args = ()
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+
+logger.addFilter(_RelPathFilter())
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Image, Plain, Record, Video
 from astrbot.api.provider import ProviderRequest
@@ -153,7 +175,7 @@ def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
 
-VERSION = "2.1.12"
+VERSION = "2.2.2"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -360,6 +382,22 @@ def absolutize_time(text: str, due: datetime | None) -> str:
     text = RELATIVE_DAY_OFFSET_RE.sub(day, text)
     text = RELATIVE_EVENING_RE.sub(f"{day}晚上", text)
     return RELATIVE_DAY_RE.sub(day, text)
+
+
+_TZ_ALIASES = {
+    "北京时间（Asia/Shanghai）": "Asia/Shanghai",
+    "重庆（Asia/Chongqing）": "Asia/Chongqing",
+    "乌鲁木齐（Asia/Urumqi）": "Asia/Urumqi",
+}
+
+
+def set_timezone(name: str) -> None:
+    global TZ
+    key = _TZ_ALIASES.get(str(name or ""), str(name or "Asia/Shanghai"))
+    try:
+        TZ = ZoneInfo(key)
+    except Exception:  # noqa: BLE001
+        TZ = timezone(timedelta(hours=8))
 
 
 def now() -> datetime:
@@ -658,6 +696,24 @@ def _parse_model_items(raw: str) -> list[dict]:
             return [data]
     return []
 
+_DB_INDEX_WARNED = False
+
+
+def _check_db_index(con) -> None:
+    global _DB_INDEX_WARNED
+    if _DB_INDEX_WARNED:
+        return
+    _DB_INDEX_WARNED = True
+    try:
+        cur = con.cursor()
+        cur.execute("SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='platform_message_history'")
+        rows = cur.fetchall()
+        if not any("created_at" in str(row[1] or "") for row in rows):
+            logger.warning("memory5: platform_message_history 缺少 created_at 索引，历史补全可能较慢")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(f"memory5: 检查数据库索引跳过 {type(exc).__name__}")
+
+
 def merge_from_db(scope: str, since_ts: str) -> int:
     """群聊补一份 AstrBot 历史记录：适配器不上报机器人自己的消息，靠这个补齐。
     顺手把没采集到的消息写进 raw，保证下次游标推进后不丢。"""
@@ -671,7 +727,7 @@ def merge_from_db(scope: str, since_ts: str) -> int:
         try:
             dt = datetime.fromisoformat(since_ts)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+                dt = dt.replace(tzinfo=TZ)
             since_utc = dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         except ValueError:
             since_utc = ""
@@ -680,6 +736,7 @@ def merge_from_db(scope: str, since_ts: str) -> int:
         if os.name == "nt":
             db_uri = "file:/" + DB_PATH.replace("\\", "/") + "?mode=ro"
         con = sqlite3.connect(db_uri, uri=True, timeout=10)
+        _check_db_index(con)
         cur = con.cursor()
         cur.execute(
             "SELECT created_at, sender_id, sender_name, content FROM platform_message_history "
@@ -732,7 +789,7 @@ def merge_from_db(scope: str, since_ts: str) -> int:
             dt = datetime.fromisoformat(str(created)).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-        local = dt.astimezone(timezone(timedelta(hours=8)))
+        local = dt.astimezone(TZ)
         ts = local.isoformat(timespec="seconds")
         key = (ts, str(sid), text)
         if key in existing or is_near_dup(ts, str(sid), text):
@@ -779,7 +836,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.2.2")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -1242,6 +1299,7 @@ class Memory5(Star):
         provider = self.context.get_using_provider()
         if not provider or not hasattr(provider, "text_chat"):
             logger.warning("memory5: 没有可用的模型提供商（可能还在启动中），本批跳过")
+            self._set_archive_status(False, "没有可用的模型提供商")
             return []
         lines = []
         for row in rows[-150:]:
@@ -1260,8 +1318,14 @@ class Memory5(Star):
             raw = (resp.completion_text or "").strip()
         except Exception as exc:
             logger.warning(f"memory5: 抽取失败 {type(exc).__name__}: {exc}")
+            self._set_archive_status(False, f"抽取失败 {type(exc).__name__}")
             return []
-        return _parse_model_items(raw)
+        items = _parse_model_items(raw)
+        if items:
+            self._set_archive_status(True, f"解析 {len(items)} 条")
+        else:
+            self._set_archive_status(False, "模型输出没有可用条目")
+        return items
 
     async def extract_scope(self, scope: str) -> int:
         """一次归档把积压的消息分批处理完（默认最多 8 批 × 200 条）。"""
@@ -1668,7 +1732,7 @@ class Memory5(Star):
         if not media.lower().startswith(("http://", "https://")):
             path = media if os.path.isabs(media) else os.path.join(MEM_ROOT, "media", media)
             if not os.path.isfile(path):
-                logger.warning(f"memory5: 富媒体文件不存在 {path}")
+                logger.warning(f"memory5: 富媒体文件不存在 {os.path.basename(path)}")
                 return None
             size = os.path.getsize(path)
             limit_mb = self._media_limit_mb(kind)
@@ -2103,41 +2167,73 @@ class Memory5(Star):
         now_ts = time.time()
 
         for qq in list(pending):
-            if now_ts - float(pending[qq] or 0) > 24 * 3600:
+            entry = pending[qq]
+            ts = entry.get("ts", 0) if isinstance(entry, dict) else entry
+            if now_ts - float(ts or 0) > 24 * 3600:
                 pending.pop(qq, None)
 
         for qq in desired - set(authorized):
-            if qq in pending:
+            entry = pending.get(qq)
+            if isinstance(entry, dict) and entry.get("code"):
                 continue
+            code = f"{secrets.randbelow(1000000):06d}"
             sent = await self._send_private(
                 qq,
-                "管理员授权验证：请回复 [已确认授权] 确认这个账号的管理员身份；24 小时内未确认不会生效。",
+                f"管理员授权验证：验证码 {code}，请回复「{code} 已确认授权」；24 小时内有效。",
             )
             if sent:
-                pending[qq] = now_ts
-                logger.info(f"memory5: 已向 {qq} 发送管理员授权验证，等待回复")
+                pending[qq] = {"code": code, "ts": now_ts}
+                logger.info(f"memory5: 已向 {qq} 发送管理员授权验证码")
 
         for qq in set(authorized) - desired:
             await self._send_private(qq, "管理员权限已移除：这个账号不再拥有鱼鱼日记的管理员权限。")
             authorized.remove(qq)
             logger.info(f"memory5: 已移除管理员 {qq} 并发送通知")
 
-        state["authorized"] = authorized
-        state["pending"] = pending
-        self._save_admin_state(state)
+        new_state = dict(state)
+        new_state["authorized"] = authorized
+        new_state["pending"] = pending
+        if new_state != state or not os.path.exists(self._admin_state_path()):
+            self._save_admin_state(new_state)
         for qq in authorized:
             self._ensure_owner_memory(qq)
 
+    async def _admin_resend(self, qq: str = "") -> int:
+        desired = self._admin_configured()
+        state = self._admin_state()
+        authorized = {str(x) for x in state.get("authorized", [])}
+        pending = dict(state.get("pending", {}))
+        sent_count = 0
+        targets = [qq] if qq else sorted(desired - authorized)
+        for target in targets:
+            if not target:
+                continue
+            code = f"{secrets.randbelow(1000000):06d}"
+            ok = await self._send_private(
+                target,
+                f"管理员授权验证：验证码 {code}，请回复「{code} 已确认授权」；24 小时内有效。",
+            )
+            if ok:
+                pending[target] = {"code": code, "ts": time.time()}
+                sent_count += 1
+        if sent_count:
+            state["pending"] = pending
+            self._save_admin_state(state)
+        return sent_count
+
     async def _admin_auth_listener(self, event: AstrMessageEvent) -> None:
         text = (event.message_str or "").strip()
-        if _normalize_system_text(text) != "已确认授权":
+        match = re.search(r"(\d{6})\D*(?:已确认授权|确认授权)", text)
+        if not match:
             return
+        code = match.group(1)
         sender = str(event.get_sender_id())
         if not getattr(event, "is_private_chat", lambda: True)():
             return
         state = self._admin_state()
         pending = state.get("pending", {})
-        if sender not in pending:
+        entry = pending.get(sender)
+        if not isinstance(entry, dict) or str(entry.get("code")) != code:
             return
         event.stop_event()
         try:
@@ -2163,17 +2259,28 @@ class Memory5(Star):
             await asyncio.sleep(60)
 
 
+    def _archive_status_path(self) -> str:
+        return os.path.join(MEM_ROOT, "archive_status.json")
+
+    def _set_archive_status(self, ok: bool, message: str) -> None:
+        try:
+            write_plain_json(self._archive_status_path(), {
+                "ok": ok, "message": message[:300], "ts": time.time(),
+            })
+        except OSError:
+            pass
+
     def _heartbeat_path(self) -> str:
         return os.path.join(MEM_ROOT, "heartbeat.json")
 
     async def _heartbeat_loop(self) -> None:
-        expected = time.monotonic() + 90
+        expected = time.monotonic() + 300
         while True:
-            await asyncio.sleep(90)
+            await asyncio.sleep(300)
             now_mono = time.monotonic()
             lag = max(0.0, now_mono - expected)
-            expected = now_mono + 90
-            if lag > 8:
+            expected = now_mono + 300
+            if lag > 10:
                 logger.warning(f"memory5: 事件循环延迟 {lag:.1f}s（阈值 8s），可能有阻塞操作")
             try:
                 write_plain_json(self._heartbeat_path(), {
@@ -2183,6 +2290,7 @@ class Memory5(Star):
                 logger.debug(f"memory5: 心跳写入失败 {type(exc).__name__}: {exc}")
 
     async def initialize(self) -> None:
+        set_timezone(str(self._get("timezone", "北京时间（Asia/Shanghai）")))
         try:
             moved = migrate_legacy_layout()
             if moved:

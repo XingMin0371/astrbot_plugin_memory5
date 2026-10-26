@@ -17,8 +17,8 @@
 | 环境 | 路径 |
 |---|---|
 | Windows 本地版 | `<AstrBot数据目录>/plugins/astrbot_plugin_memory5/` |
-| Linux 本地版 | `/opt/astrbot/data/plugins/astrbot_plugin_memory5/` |
-| Docker | 宿主机挂载的 `data/plugins/astrbot_plugin_memory5/`（容器内 `/AstrBot/data/plugins/memory5`） |
+| Linux 本地版 | `<data>/plugins/astrbot_plugin_memory5/` |
+| Docker | 宿主机挂载的 `data/plugins/astrbot_plugin_memory5/`（容器内 `<data>/plugins/memory5`） |
 
 放好后目录里应能看到：
 

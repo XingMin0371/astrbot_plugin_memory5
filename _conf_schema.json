@@ -68,6 +68,19 @@
         "hint": "立即执行一次归档，完成后自动取消勾选。",
         "type": "bool",
         "default": false
+      },
+      "timezone": {
+        "description": "时区",
+        "hint": "一个国家只保留一个代表时区；中国用北京时间 UTC+8",
+        "type": "string",
+        "options": [
+          "北京时间（Asia/Shanghai）",
+          "东京（Asia/Tokyo）",
+          "UTC",
+          "伦敦（Europe/London）",
+          "纽约（America/New_York）"
+        ],
+        "default": "北京时间（Asia/Shanghai）"
       }
     }
   },
@@ -86,19 +99,13 @@
         "description": "记录的会话",
         "hint": "需要归档的会话，格式 group:群号 或 private:QQ号。",
         "type": "list",
-        "default": [
-          "group:REDACTED_GROUP",
-          "private:REDACTED_USER"
-        ]
+        "default": []
       },
       "notify_scopes": {
         "description": "归档通知发到",
         "hint": "归档完成后向这些会话发送提示。",
         "type": "list",
-        "default": [
-          "private:REDACTED_USER",
-          "group:REDACTED_GROUP"
-        ]
+        "default": []
       },
       "notify_quiet_ranges": {
         "description": "免打扰时段",

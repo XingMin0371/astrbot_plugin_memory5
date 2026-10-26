@@ -597,7 +597,7 @@ class _TasksMixin:
                 if new:
                     item["alias"] = new[:12]
                 if confidence is not None:
-                    item["confidence"] = max(0.0, min(1.0, confidence))
+                    item["confidence"] = round(max(0.0, min(1.0, confidence)), 2)
                 item["last_seen"] = time.strftime("%Y-%m-%d")
                 break
         else:
@@ -719,7 +719,7 @@ class _TasksMixin:
         try:
             hb = read_json(os.path.join(MEM_ROOT, "heartbeat.json"), {}) or {}
             age = time.time() - float(hb.get("ts") or 0)
-            add("心跳", age < 120 and float(hb.get("lag") or 0) < 10, f"{age:.0f}s 前 / 延迟 {hb.get('lag', 0)}s")
+            add("心跳", age < 180 and float(hb.get("lag") or 0) < 10, f"{age:.0f}s 前 / 延迟 {hb.get('lag', 0)}s")
         except Exception:  # noqa: BLE001
             add("心跳", False, "读取失败")
         try:
@@ -793,6 +793,26 @@ class _TasksMixin:
             pass
         return jsonify({"status": "ok", "data": {"path": path, "exists": bool(path and os.path.isfile(path))}})
 
+
+    async def auth_resend(self):
+        body = await request.get_json() or {}
+        qq = str(body.get("qq", "")).strip()
+        sent = await self.plugin._admin_resend(qq)
+        return jsonify({"status": "ok", "data": {"sent": sent}})
+
+    async def corrupt_clear(self):
+        removed = 0
+        for root, _dirs, files in os.walk(MEM_ROOT):
+            for name in files:
+                if ".corrupt-" not in name:
+                    continue
+                try:
+                    os.remove(os.path.join(root, name))
+                    removed += 1
+                except OSError:
+                    pass
+        return jsonify({"status": "ok", "data": {"removed": removed}})
+
     async def health(self):
         from .main import VERSION, refresh_index
 
@@ -853,7 +873,45 @@ class _TasksMixin:
         verify = read_json(os.path.join(MEM_ROOT, "backup_verify.json"), {})
         exports = read_json(os.path.join(MEM_ROOT, "export_history.json"), []) or []
         panel_enabled = bool(self.plugin._get("health_panel", True))
+        try:
+            from .crypto import enc_key
+            plaintext = enc_key() is None
+        except Exception:  # noqa: BLE001
+            plaintext = False
+        try:
+            state = self.plugin._admin_state()
+            pending = state.get("pending", {}) or {}
+            remain = []
+            for qq, entry in pending.items():
+                ts = entry.get("ts", 0) if isinstance(entry, dict) else entry
+                left = max(0, int(24 * 3600 - (time.time() - float(ts or 0))))
+                remain.append({"id": qq, "hours": round(left / 3600, 1)})
+            authorization = {
+                "mode": self.plugin._admin_mode(),
+                "authorized": len(state.get("authorized", [])),
+                "pending": remain,
+            }
+        except Exception:  # noqa: BLE001
+            authorization = {}
+        try:
+            archive = read_json(os.path.join(MEM_ROOT, "archive_status.json"), {}) or {}
+        except Exception:  # noqa: BLE001
+            archive = {}
+        corrupt = []
+        for root, _dirs, files in os.walk(MEM_ROOT):
+            for name in files:
+                if ".corrupt-" in name:
+                    corrupt.append(name)
+        try:
+            selfcheck_path = open(os.path.join(os.path.dirname(MEM_ROOT), "selfcheck-latest.txt"), encoding="utf-8").read().strip()
+        except OSError:
+            selfcheck_path = ""
         payload = {
+            "selfcheck_path": selfcheck_path,
+            "plaintext": plaintext,
+            "authorization": authorization,
+            "archive_status": archive,
+            "corrupt_files": corrupt,
             "panel_enabled": panel_enabled,
             "export_total": len(exports),
             "exports": list(reversed(exports[-20:])),
@@ -865,6 +923,7 @@ class _TasksMixin:
             "backup": {"policy": policy, "last_verify": verify},
         }
         payload["heartbeat"] = hb
+        payload["selfcheck_path"] = selfcheck_path
         self._health_cache = {"ts": now_ts, "data": payload}
         return jsonify({"status": "ok", "data": payload})
 
@@ -892,6 +951,8 @@ class Memory5WebUI(_TasksMixin):
             ("/memory5/aliases-delete", self.aliases_delete, ["POST"], "删除别名"),
             ("/memory5/health", self.health, ["GET"], "健康状态"),
             ("/memory5/selfcheck", self.selfcheck, ["POST"], "自检"),
+            ("/memory5/auth-resend", self.auth_resend, ["POST"], "重发授权"),
+            ("/memory5/corrupt-clear", self.corrupt_clear, ["POST"], "清理损坏文件"),
             ("/memory5/selfcheck/latest", self.selfcheck_latest, ["GET"], "自检记录"),
             ("/memory5/export-history", self.export_history, ["GET"], "导出历史"),
             ("/memory5/export-history-clear", self.export_history_clear, ["POST"], "清空导出历史"),
