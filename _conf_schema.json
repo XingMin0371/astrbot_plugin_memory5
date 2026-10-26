@@ -4,9 +4,25 @@
     "hint": "谁可以管理，谁的消息不记。",
     "type": "object",
     "items": {
+      "admin_id_type": {
+        "description": "管理员账号类型",
+        "hint": "QQ 号走 QQ 授权；其他平台账号用于 Telegram/Discord 等",
+        "type": "string",
+        "options": [
+          "QQ号",
+          "其他平台账号"
+        ],
+        "default": "QQ号"
+      },
       "admin_qqs": {
         "description": "管理员 QQ",
         "hint": "拥有查看全部日记与使用重要级命令的权限。",
+        "type": "list",
+        "default": []
+      },
+      "admin_accounts": {
+        "description": "管理员平台账号",
+        "hint": "仅“其他平台账号”模式使用，填平台里的用户 ID",
         "type": "list",
         "default": []
       },
