@@ -8,7 +8,7 @@
       html, body { background: #f6f7f9; color: #1c1e21; }
       body { margin: 0; font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
     </style>
-    <link rel="stylesheet" href="./style.css?v=2.1.13" />
+    <link rel="stylesheet" href="./style.css?v=2.1.12beta1beta1" />
   </head>
   <body>
     <div class="wrap">
@@ -80,11 +80,12 @@
       </div>
 
         <section id="healthCard" class="card health-card hidden">
-          <div class="health-title">运行状态</div>
+          <div class="health-title">运行状态 <button id="selfcheckBtn" type="button">自检</button></div>
+          <div id="selfcheckOut" class="muted"></div>
           <div id="healthBody" class="health-body"></div>
         </section>
 
     </div>
-    <script src="./app.js?v=2.1.13" defer></script>
+    <script src="./app.js?v=2.1.12beta1beta1" defer></script>
   </body>
 </html>
