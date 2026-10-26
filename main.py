@@ -124,18 +124,13 @@ def record_umo(scope: str, umo: str) -> None:
         data[scope] = umo
         write_plain_json(_umos_path(), data)
 
-def _normalize_system_text(text: str) -> str:
+def _normalize_auth_text(text: str) -> str:
     return str(text or "").strip().strip("[]【】「」 ").strip()
 
 
-def _is_system_text(text: str) -> bool:
-    norm = _normalize_system_text(text)
-    if norm == "已确认授权":
-        return True
-    for prefix in ("管理员授权验证：", "管理员权限已移除：", "已确认授权："):
-        if str(text or "").strip().startswith(prefix):
-            return True
-    return False
+def _is_auth_attempt(text: str) -> bool:
+    norm = _normalize_auth_text(text)
+    return norm == "已确认授权" or bool(re.fullmatch(r"\d{6}\s*已确认授权", norm))
 
 
 def encrypt_existing_storage() -> int:
@@ -991,9 +986,11 @@ class Memory5(Star):
             if not scope or scope not in self.scopes:
                 return
             text = (event.message_str or "").strip()
-            if _is_system_text(text):
-                return
             sender = str(event.get_sender_id())
+            if _is_auth_attempt(text):
+                pending = self._admin_state().get("pending", {})
+                if sender in pending or sender in self._admin_configured():
+                    return
             self_ids = {str(x) for x in self.bot_qqs()}
             try:
                 self_id = str(event.get_self_id() or "")
@@ -2254,7 +2251,7 @@ class Memory5(Star):
 
     async def _admin_auth_listener(self, event: AstrMessageEvent) -> None:
         text = (event.message_str or "").strip()
-        if "已确认授权" not in text:
+        if not _is_auth_attempt(text):
             return
         sender = str(event.get_sender_id())
         if not getattr(event, "is_private_chat", lambda: True)():
