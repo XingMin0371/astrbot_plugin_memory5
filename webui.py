@@ -704,7 +704,7 @@ class _TasksMixin:
             ok = ok and passed
             lines.append(f"[{'OK' if passed else 'FAIL'}] {name} {detail}".strip())
 
-        data_root = os.path.dirname(os.path.dirname(MEM_ROOT))
+        data_root = os.path.dirname(os.path.dirname(os.path.dirname(MEM_ROOT)))
         add("数据目录可写", os.access(MEM_ROOT, os.W_OK), MEM_ROOT)
         add("密钥存在", enc_key() is not None, KEY_PATH if "KEY_PATH" in globals() else "")
         probe = os.path.join(MEM_ROOT, ".selfcheck.tmp")
