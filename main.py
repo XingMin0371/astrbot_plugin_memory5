@@ -2008,7 +2008,11 @@ class Memory5(Star):
         out = []
         platform = os.environ.get("MEMORY5_PLATFORM", "").strip()
         known = load_umos().get(str(scope))
-        names = self._platform_names() + ([platform] if platform else [])
+        names = self._platform_names()
+        # 已记录的会话如果还属于当前平台，优先用；否则按当前平台名重试
+        if known and any(known.startswith(name + ":") for name in names):
+            out.append(known)
+        names = names + ([platform] if platform else [])
         for name in names + ["snowluma", "aiocqhttp"]:
             if not name:
                 continue
@@ -2053,11 +2057,26 @@ class Memory5(Star):
             pass
         self._write_owner_memory(qq)
 
+
+    def _admin_mode(self) -> str:
+        return "account" if str(self._get("admin_id_type", "QQ号")) == "其他平台账号" else "qq"
+
+    def _admin_configured(self) -> set[str]:
+        raw = self._get("admin_qqs", []) if self._admin_mode() == "qq" else self._get("admin_accounts", [])
+        if isinstance(raw, str):
+            raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
+        out = set()
+        for item in raw or []:
+            value = str(item).strip()
+            if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
+                out.add(value)
+        return out
+
     def _write_owner_memory(self, qq: str) -> None:
-        if not str(qq).isdigit():
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(qq)):
             return
         name = str(self._get("bot_name", "鱼鱼") or "鱼鱼")
-        bots = sorted(self.bot_qqs())
+        bots = sorted(self.bot_qqs()) if self._admin_mode() == "qq" else []
         bot_qq = bots[0] if bots else ""
         text = f"{name}({bot_qq}) 的管理员" if bot_qq else f"{name} 的管理员"
         scope = f"private:{qq}"
@@ -2071,15 +2090,14 @@ class Memory5(Star):
             logger.warning(f"memory5: 写主人长期记忆失败 {type(exc).__name__}: {exc}")
 
     async def _admin_sync(self) -> None:
-        desired = set()
-        raw = self._get("admin_qqs", [])
-        if isinstance(raw, str):
-            raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
-        for item in raw or []:
-            qq = str(item).strip()
-            if qq.isdigit():
-                desired.add(qq)
+        desired = self._admin_configured()
         state = self._admin_state()
+        mode = self._admin_mode()
+        if state.get("mode") and state.get("mode") != mode:
+            state["mode"] = mode
+            state["authorized"] = []
+            state["pending"] = {}
+            logger.info(f"memory5: 管理员账号类型切换为 {mode}，需要重新授权")
         authorized = [str(x) for x in state.get("authorized", [])]
         pending = dict(state.get("pending", {}))
         now_ts = time.time()
@@ -2093,14 +2111,14 @@ class Memory5(Star):
                 continue
             sent = await self._send_private(
                 qq,
-                "管理员授权验证：请回复 [已确认授权] 确认这个 QQ 的管理员身份；24 小时内未确认不会生效。",
+                "管理员授权验证：请回复 [已确认授权] 确认这个账号的管理员身份；24 小时内未确认不会生效。",
             )
             if sent:
                 pending[qq] = now_ts
                 logger.info(f"memory5: 已向 {qq} 发送管理员授权验证，等待回复")
 
         for qq in set(authorized) - desired:
-            await self._send_private(qq, "管理员权限已移除：这个 QQ 不再拥有鱼鱼日记的管理员权限。")
+            await self._send_private(qq, "管理员权限已移除：这个账号不再拥有鱼鱼日记的管理员权限。")
             authorized.remove(qq)
             logger.info(f"memory5: 已移除管理员 {qq} 并发送通知")
 
