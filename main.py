@@ -2235,18 +2235,35 @@ class Memory5(Star):
 
     async def _admin_auth_listener(self, event: AstrMessageEvent) -> None:
         text = (event.message_str or "").strip()
-        match = re.search(r"(\d{6})\D*(?:已确认授权|确认授权)", text)
-        if not match:
+        if "已确认授权" not in text:
             return
-        code = match.group(1)
         sender = str(event.get_sender_id())
         if not getattr(event, "is_private_chat", lambda: True)():
             return
         state = self._admin_state()
         pending = state.get("pending", {})
-        entry = pending.get(sender)
-        if not isinstance(entry, dict) or str(entry.get("code")) != code:
+        configured = self._admin_configured()
+        if sender not in pending and sender not in configured:
             return
+        event.stop_event()
+        try:
+            event.should_call_llm(False)
+        except Exception:  # noqa: BLE001
+            pass
+        match = re.search(r"(\d{6})\D*(?:已确认授权|确认授权)", text)
+        entry = pending.get(sender)
+        if not match or not isinstance(entry, dict) or str(entry.get("code")) != match.group(1):
+            if isinstance(entry, dict) and entry.get("code"):
+                await self._send_private(
+                    sender,
+                    f"授权未完成：请回复「{entry['code']} 已确认授权」，验证码 10 分钟内有效。",
+                )
+            elif sender in {str(x) for x in state.get("authorized", [])}:
+                await self._send_private(sender, "这个账号已经授权过了，不需要重复确认。")
+            else:
+                await self._send_private(sender, "当前没有待确认的授权，请在面板点「重发授权」获取验证码。")
+            return
+        code = match.group(1)
         event.stop_event()
         try:
             event.should_call_llm(False)
