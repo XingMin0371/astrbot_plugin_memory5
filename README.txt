@@ -180,7 +180,7 @@
 ├─ trash/ media/ backup_policy.json
 └─ export_history.json
 
-密钥在 <数据目录>/plugin_data/astrbot_plugin_memory5/.memory5.key。
+密钥在 <数据目录>/plugin_data/astrbot_plugin_memory5/keys/memory5.key。
 
 
 隐私

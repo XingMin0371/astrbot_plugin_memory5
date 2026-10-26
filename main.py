@@ -735,7 +735,7 @@ def merge_from_db(scope: str, since_ts: str) -> int:
         db_uri = f"file:{DB_PATH}?mode=ro"
         if os.name == "nt":
             db_uri = "file:/" + DB_PATH.replace("\\", "/") + "?mode=ro"
-        con = sqlite3.connect(db_uri, uri=True, timeout=10)
+        con = sqlite3.connect(db_uri, uri=True, timeout=12)
         _check_db_index(con)
         cur = con.cursor()
         cur.execute(
@@ -2185,14 +2185,26 @@ class Memory5(Star):
                 pending[qq] = {"code": code, "ts": now_ts}
                 logger.info(f"memory5: 已向 {qq} 发送管理员授权验证码")
 
-        for qq in set(authorized) - desired:
-            await self._send_private(qq, "管理员权限已移除：这个账号不再拥有鱼鱼日记的管理员权限。")
-            authorized.remove(qq)
-            logger.info(f"memory5: 已移除管理员 {qq} 并发送通知")
+        missing = dict(state.get("missing", {}))
+        if desired:
+            for qq in set(authorized) - desired:
+                count = int(missing.get(qq, 0)) + 1
+                if count < 2:
+                    missing[qq] = count
+                    continue
+                await self._send_private(qq, "管理员权限已移除：这个账号不再拥有鱼鱼日记的管理员权限。")
+                authorized.remove(qq)
+                missing.pop(qq, None)
+                logger.info(f"memory5: 已移除管理员 {qq} 并发送通知")
+        else:
+            logger.debug("memory5: 管理员配置为空，保留已授权状态，等待配置稳定")
+        for qq in desired:
+            missing.pop(qq, None)
 
         new_state = dict(state)
         new_state["authorized"] = authorized
         new_state["pending"] = pending
+        new_state["missing"] = missing
         if new_state != state or not os.path.exists(self._admin_state_path()):
             self._save_admin_state(new_state)
         for qq in authorized:
