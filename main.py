@@ -147,7 +147,7 @@ def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
 
-VERSION = "2.1.12"
+VERSION = "2.1.13"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -773,7 +773,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.13")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -893,6 +893,11 @@ class Memory5(Star):
             except (ValueError, AttributeError):
                 continue
         return out or [(8, 0), (20, 0)]
+
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def admin_auth_listener(self, event: AstrMessageEvent) -> None:
+        await self._admin_auth_listener(event)
 
     # -------------------------------------------------------------- scope
     @staticmethod
@@ -1962,75 +1967,136 @@ class Memory5(Star):
 
     # --------------------------------------------------------------- init
 
-    def _balance_state_path(self) -> str:
-        return os.path.join(MEM_ROOT, "balance_state.json")
 
-    def _fetch_balance(self, key: str):
-        import urllib.request
+    # ------------------------------------------------------- admin auth
+    def _admin_state_path(self) -> str:
+        return os.path.join(MEM_ROOT, "admins.json")
 
-        req = urllib.request.Request(
-            "https://api.deepseek.com/user/balance",
-            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-        infos = data.get("balance_infos") or []
-        if not infos:
-            return None
-        item = infos[0]
-        return float(item.get("total_balance") or 0), str(item.get("currency") or "CNY")
+    def _admin_state(self) -> dict:
+        data = read_json(self._admin_state_path(), {})
+        if not isinstance(data, dict):
+            data = {}
+        data.setdefault("authorized", [])
+        data.setdefault("pending", {})
+        return data
 
-    async def _balance_tick(self) -> None:
-        if not bool(self._get("balance_enable", False)):
-            return
-        key = str(self._get("balance_api_key", "") or os.environ.get("DEEPSEEK_API_KEY", "")).strip()
-        if not key:
-            logger.debug("memory5: 余额提醒未配置 API Key，跳过")
-            return
+    def _save_admin_state(self, state: dict) -> None:
+        write_json(self._admin_state_path(), state)
+
+
+    def _platform_names(self) -> list[str]:
+        names = []
         try:
-            result = await asyncio.to_thread(self._fetch_balance, key)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(f"memory5: 查询余额失败 {type(exc).__name__}: {exc}")
-            return
-        if not result:
-            return
-        total, currency = result
-        threshold = float(self._get("balance_threshold", 10.0) or 10.0)
-        admin = str(self._get("balance_admin_qq", "")).strip()
-        if not admin:
-            admins = self.admin_qqs()
-            admin = admins[0] if admins else ""
-        state = read_json(self._balance_state_path(), {}) or {}
-        if total >= threshold:
-            if state.get("alerted"):
-                write_plain_json(self._balance_state_path(), {"alerted": False, "total": total})
-            return
-        if state.get("alerted"):
-            return
-        if not admin:
-            logger.warning("memory5: 余额低于阈值，但没有配置接收提醒的管理员 QQ")
-            return
-        umo = self._umo_for(f"private:{admin}")
-        if not umo:
-            logger.warning("memory5: 余额提醒找不到管理员私聊会话，等下次消息后再试")
-            return
-        try:
-            chain = MessageChain().message(f"余额提醒：当前 {total:.2f} {currency}，低于设定值 {threshold:.2f} 元。")
-            await asyncio.wait_for(self.context.send_message(umo, chain), timeout=15)
-            write_plain_json(self._balance_state_path(), {"alerted": True, "total": total})
-            logger.info(f"memory5: 已给管理员发送余额提醒 {total:.2f} {currency}")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(f"memory5: 余额提醒发送失败 {type(exc).__name__}: {exc}")
+            for inst in self.context.platform_manager.platform_insts:
+                meta = inst.meta()
+                name = getattr(meta, "name", "") or getattr(inst, "name", "")
+                if name:
+                    names.append(str(name))
+        except Exception:  # noqa: BLE001
+            pass
+        return names
 
-    async def _balance_loop(self) -> None:
-        await asyncio.sleep(30)
+    def _umo_candidates(self, scope: str) -> list[str]:
+        out = []
+        known = load_umos().get(str(scope))
+        if known:
+            out.append(known)
+        platform = os.environ.get("MEMORY5_PLATFORM", "").strip()
+        for name in self._platform_names() + ([platform] if platform else []) + ["aiocqhttp", "snowluma"]:
+            if not name:
+                continue
+            if scope.startswith("group:"):
+                cand = f"{name}:GroupMessage:{scope.split(':', 1)[1]}"
+            elif scope.startswith("private:"):
+                cand = f"{name}:FriendMessage:{scope.split(':', 1)[1]}"
+            else:
+                continue
+            if cand not in out:
+                out.append(cand)
+        return out
+
+    async def _send_private(self, qq: str, text: str) -> bool:
+        candidates = self._umo_candidates(f"private:{qq}")
+        if not candidates:
+            logger.warning(f"memory5: 找不到 {qq} 的私聊会话，授权消息发不出去")
+            return False
+        for umo in candidates:
+            try:
+                chain = MessageChain().message(text)
+                await asyncio.wait_for(self.context.send_message(umo, chain), timeout=15)
+                if load_umos().get(f"private:{qq}") != umo:
+                    record_umo(f"private:{qq}", umo)
+                return True
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"memory5: 候选 {umo} 发送失败 {type(exc).__name__}")
+        logger.warning(f"memory5: 给 {qq} 发送授权消息失败，所有候选会话都不可用")
+        return False
+
+    async def _admin_sync(self) -> None:
+        desired = set()
+        raw = self._get("admin_qqs", [])
+        if isinstance(raw, str):
+            raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
+        for item in raw or []:
+            qq = str(item).strip()
+            if qq.isdigit():
+                desired.add(qq)
+        state = self._admin_state()
+        authorized = [str(x) for x in state.get("authorized", [])]
+        pending = dict(state.get("pending", {}))
+        now_ts = time.time()
+
+        for qq in list(pending):
+            if now_ts - float(pending[qq] or 0) > 24 * 3600:
+                pending.pop(qq, None)
+
+        for qq in desired - set(authorized):
+            if qq in pending:
+                continue
+            sent = await self._send_private(
+                qq,
+                "管理员授权验证：请回复 [已确认授权] 确认这个 QQ 的管理员身份；24 小时内未确认不会生效。",
+            )
+            if sent:
+                pending[qq] = now_ts
+                logger.info(f"memory5: 已向 {qq} 发送管理员授权验证，等待回复")
+
+        for qq in set(authorized) - desired:
+            await self._send_private(qq, "管理员权限已移除：这个 QQ 不再拥有鱼鱼日记的管理员权限。")
+            authorized.remove(qq)
+            logger.info(f"memory5: 已移除管理员 {qq} 并发送通知")
+
+        state["authorized"] = authorized
+        state["pending"] = pending
+        self._save_admin_state(state)
+
+    async def _admin_auth_listener(self, event: AstrMessageEvent) -> None:
+        text = (event.message_str or "").strip()
+        if "已确认授权" not in text:
+            return
+        sender = str(event.get_sender_id())
+        if not getattr(event, "is_private_chat", lambda: True)():
+            return
+        state = self._admin_state()
+        pending = state.get("pending", {})
+        if sender not in pending:
+            return
+        authorized = set(str(x) for x in state.get("authorized", []))
+        authorized.add(sender)
+        pending.pop(sender, None)
+        state["authorized"] = sorted(authorized)
+        state["pending"] = pending
+        self._save_admin_state(state)
+        logger.info(f"memory5: {sender} 已确认管理员授权")
+        await self._send_private(sender, "已确认授权：这个 QQ 现在是鱼鱼日记的管理员。")
+
+    async def _admin_loop(self) -> None:
         while True:
             try:
-                await self._balance_tick()
+                await self._admin_sync()
             except Exception as exc:  # noqa: BLE001
-                logger.debug(f"memory5: 余额循环跳过 {type(exc).__name__}: {exc}")
-            hours = max(1, self._int("balance_check_hours", 6))
-            await asyncio.sleep(hours * 3600)
+                logger.debug(f"memory5: 管理员授权检查跳过 {type(exc).__name__}: {exc}")
+            await asyncio.sleep(60)
 
     async def initialize(self) -> None:
         try:
@@ -2072,7 +2138,7 @@ class Memory5(Star):
             logger.info("memory5: 检测到手动归档开关，稍后执行一次")
             asyncio.create_task(self._delayed_archive())
         asyncio.create_task(self._prewarm_cache())
-        asyncio.create_task(self._balance_loop())
+        asyncio.create_task(self._admin_loop())
         if self._extract_task is None or self._extract_task.done():
             self._extract_task = asyncio.create_task(self._extract_loop())
         if self._task is None or self._task.done():
