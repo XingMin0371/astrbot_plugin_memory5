@@ -1128,6 +1128,8 @@ async function loadHealth(show = false) {
   }
   if (show) card.classList.remove("hidden");
 
+  const hb = data.heartbeat || {};
+  const hbText = hb.age == null ? "暂无心跳" : `${hb.age}s 前 · 延迟 ${hb.lag || 0}s`;
   const enc = data.encryption || {};
   const cache = data.cache || {};
   const backup = data.backup || {};
@@ -1160,6 +1162,7 @@ async function loadHealth(show = false) {
 
   box.innerHTML =
     `<div class="item"><b>版本</b><span>v${data.version || "-"}</span></div>`
+    + `<div class="item"><b>心跳</b><span>${hbText}</span></div>`
     + `<div class="item"><b>会话</b><span>${scopes.length} 个（群/私聊）</span>`
     + `<span class="muted">${scopeText}</span></div>`
     + `<div class="item"><b>加密</b><span>${enc.mode || "-"}（${enc.format || "-"}）</span>`
