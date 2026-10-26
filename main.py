@@ -31,10 +31,8 @@ try:  # 包内正常加载
     from .crypto import (
         DATA_DIR,
         MEM_ROOT,
-        PLUGIN_DATA_DIR,
         migrate_legacy_layout,
         KEY_PATH,
-        CryptoError,
         MODE_LABELS,
         append_jsonl_row,
         crypto_mode,
@@ -44,8 +42,6 @@ try:  # 包内正常加载
         ensure_key,
         encrypt_tree,
         generate_new_key,
-        key_age_seconds,
-        rotate_key,
         key_age_seconds,
         rotate_key,
         ensure_dir,
@@ -64,10 +60,8 @@ except ImportError:  # 单文件方式加载（本地测试）
     from crypto import (  # type: ignore[no-redef]
         DATA_DIR,
         MEM_ROOT,
-        PLUGIN_DATA_DIR,
         migrate_legacy_layout,
         KEY_PATH,
-        CryptoError,
         MODE_LABELS,
         append_jsonl_row,
         crypto_mode,
@@ -77,8 +71,6 @@ except ImportError:  # 单文件方式加载（本地测试）
         ensure_key,
         encrypt_tree,
         generate_new_key,
-        key_age_seconds,
-        rotate_key,
         key_age_seconds,
         rotate_key,
         ensure_dir,
@@ -161,7 +153,7 @@ def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
 
-VERSION = "2.1.12beta4"
+VERSION = "2.1.12beta3"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -787,7 +779,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12beta4")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12beta3")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -2157,14 +2149,14 @@ class Memory5(Star):
         return os.path.join(MEM_ROOT, "heartbeat.json")
 
     async def _heartbeat_loop(self) -> None:
-        expected = time.monotonic() + 30
+        expected = time.monotonic() + 90
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(90)
             now_mono = time.monotonic()
             lag = max(0.0, now_mono - expected)
-            expected = now_mono + 30
-            if lag > 5:
-                logger.warning(f"memory5: 事件循环延迟 {lag:.1f}s，可能有阻塞操作")
+            expected = now_mono + 90
+            if lag > 8:
+                logger.warning(f"memory5: 事件循环延迟 {lag:.1f}s（阈值 8s），可能有阻塞操作")
             try:
                 write_plain_json(self._heartbeat_path(), {
                     "ts": time.time(), "lag": round(lag, 2), "version": VERSION,
