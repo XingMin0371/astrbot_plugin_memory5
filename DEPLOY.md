@@ -32,12 +32,12 @@ CHANGELOG.md  DEPLOY.md  blocked_words.txt  pages/memory-console/…
 **恢复已有日记**：把 `memory5.key` 复制为：
 
 ```
-<数据目录>/plugin_data/astrbot_plugin_memory5/.memory5.key
+<数据目录>/plugin_data/astrbot_plugin_memory5/keys/memory5.key
 ```
 
 Linux 下权限设 600。
 
-**全新开始**：不放密钥即可。插件首次启动会自动生成密钥（`<数据目录>/plugin_data/astrbot_plugin_memory5/.memory5.key`），
+**全新开始**：不放密钥即可。插件首次启动会自动生成密钥（`<数据目录>/plugin_data/astrbot_plugin_memory5/keys/memory5.key`），
 设置页会显示「已启用」，从此日记以密文保存。
 
 ## 三、恢复旧数据（可选）
@@ -55,7 +55,7 @@ Linux 下权限设 600。
 1. 启动 AstrBot，进入「插件」页，启用「鱼鱼日记」。
 2. 打开设置页「安全与加密」，应看到：
    - 加密状态：`已启用（平衡 · AES-256-GCM + HKDF-SHA256 子密钥 · 格式 M5E3）`（或「未启用」）
-   - 密钥路径：`<数据目录>/plugin_data/astrbot_plugin_memory5/.memory5.key`
+   - 密钥路径：`<数据目录>/plugin_data/astrbot_plugin_memory5/keys/memory5.key`
 3. 打开插件面板，能看到范围、日期、各页签。
 4. 群里发 `/记忆查看`，有返回即正常。
 
@@ -67,7 +67,7 @@ Linux 下权限设 600。
 ## 六、卸载
 
 1. 在插件页停用并删除「鱼鱼日记」。
-2. 视需要删除 `<数据目录>/plugin_data/astrbot_plugin_memory5/memory5/`（日记）与 `.memory5.key`（密钥）。
+2. 视需要删除 `<数据目录>/plugin_data/astrbot_plugin_memory5/memory5/`（日记）与 `<数据目录>/plugin_data/astrbot_plugin_memory5/keys/memory5.key`（密钥）。
    **删密钥后加密日记将无法恢复。**
 
 ## 七、常见问题

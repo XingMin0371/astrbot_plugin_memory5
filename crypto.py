@@ -112,7 +112,12 @@ def migrate_legacy_layout() -> int:
                     moved += 1
                     break
                 except OSError:
-                    continue
+                    try:
+                        shutil.copy2(old_key, new_key)
+                        moved += 1
+                        break
+                    except OSError:
+                        continue
     return moved
 
 
@@ -265,8 +270,34 @@ def generate_new_key() -> bytes | None:
     return enc_key()
 
 
+def _legacy_keys() -> list[str]:
+    return [
+        os.path.join(DATA_DIR, ".memory5.key"),
+        os.path.join(PLUGIN_DATA_DIR, ".memory5.key"),
+        os.path.join(DATA_DIR, "plugin_data", ".memory5_keys", "memory5.key"),
+    ]
+
+
 def ensure_key() -> tuple[bytes | None, bool]:
     """确保存在可用密钥；缺失或损坏时自动生成。返回 (密钥, 是否新生成)。"""
+    global KEY_PATH
+    if not os.path.exists(KEY_PATH):
+        for old_key in _legacy_keys():
+            if not os.path.exists(old_key):
+                continue
+            try:
+                ensure_dir(os.path.dirname(KEY_PATH))
+                shutil.copy2(old_key, KEY_PATH)
+                os.chmod(KEY_PATH, 0o600)
+                break
+            except OSError:
+                try:
+                    key = _read_key_file(old_key)
+                    KEY_PATH = old_key
+                    logger.warning("memory5: 无法复制旧密钥，继续使用旧路径，未生成新密钥")
+                    return key, False
+                except Exception as exc:  # noqa: BLE001
+                    raise RuntimeError(f"旧密钥存在但不可读/不可复制: {old_key}") from exc
     key = enc_key()
     if key is not None:
         return key, False

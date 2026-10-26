@@ -123,7 +123,7 @@
 
 ## 从旧版本升级
 
-第一次启动会自动把旧的 `<数据目录>/memory5/` 和 `<数据目录>/.memory5.key` 迁移到 `plugin_data/astrbot_plugin_memory5/`，旧目录会清空，不需要手动搬。
+第一次启动会自动把旧的 `<数据目录>/memory5/` 和 `<数据目录>/.memory5.key`（旧版，已迁移） 迁移到 `plugin_data/astrbot_plugin_memory5/`（密钥在 `keys/memory5.key`），旧目录会清空，不需要手动搬。
 
 ## 兼容性
 
@@ -170,7 +170,7 @@
 └─ export_history.json
 ```
 
-密钥在 `<数据目录>/plugin_data/astrbot_plugin_memory5/.memory5.key`。
+密钥在 `<数据目录>/plugin_data/astrbot_plugin_memory5/keys/memory5.key`。
 
 ## 隐私
 
