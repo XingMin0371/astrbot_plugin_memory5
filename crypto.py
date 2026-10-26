@@ -138,6 +138,7 @@ _TEXT_CACHE: "OrderedDict[str, tuple[tuple[int, int], str, bool]]" = OrderedDict
 _CACHE_MAX_FILES = 512
 _CACHE_MAX_BYTES = 64 * 1024 * 1024
 _CACHE_BYTES = 0
+_BAD_LINES = {}
 _KEY_LOADED = False
 _PLAIN_WARNED = False
 
@@ -610,7 +611,15 @@ def _load_plain_text(path: str) -> tuple[str, bool]:
         line_magics = tuple(fmt["line"] for fmt in FORMAT.values())
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if any(line.startswith(line_magics) for line in lines):
-            text = "\n".join(decrypt_line(line) for line in lines) + ("\n" if lines else "")
+            good = []
+            bad = 0
+            for line in lines:
+                try:
+                    good.append(decrypt_line(line))
+                except Exception:
+                    bad += 1
+            _BAD_LINES[path] = bad
+            text = "\n".join(good) + ("\n" if good else "")
             encrypted = True
 
     _cache_store(path, stat_key, text, encrypted)
@@ -641,17 +650,26 @@ def write_text(path: str, text: str) -> None:
 def read_jsonl(path: str) -> list[dict]:
     rows: list[dict] = []
     text, encrypted = _load_plain_text(path)
+    bad = _BAD_LINES.pop(path, 0)
     for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
         try:
             rows.append(json.loads(line))
-        except ValueError as exc:
-            if encrypted:
-                # 加密文件里出现解不开的行，说明文件被改动，不能静默跳过
-                raise CryptoError("有一行解密失败（文件被改动或密钥不匹配）") from exc
-            continue
+        except ValueError:
+            bad += 1
+    if bad:
+        try:
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            backup = f"{path}.corrupt-{stamp}"
+            if os.path.exists(path):
+                with open(path, "rb") as src, open(backup, "wb") as dst:
+                    dst.write(src.read())
+            write_jsonl(path, rows)
+            logger.warning(f"memory5: {os.path.basename(path)} 有 {bad} 行损坏，已隔离到 {os.path.basename(backup)} 并跳过")
+        except OSError as exc:
+            logger.warning(f"memory5: {os.path.basename(path)} 损坏 {bad} 行，隔离失败 {exc}")
     return rows
 
 

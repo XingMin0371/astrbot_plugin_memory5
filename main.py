@@ -147,7 +147,7 @@ def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
 
-VERSION = "2.1.11"
+VERSION = "2.1.12"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -773,7 +773,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.11")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -1441,7 +1441,7 @@ class Memory5(Star):
             chain = MessageChain()
             chain.chain = [Plain("【今日回忆已完成归档】")]
             try:
-                await self.context.send_message(umo, chain)
+                await asyncio.wait_for(self.context.send_message(umo, chain), timeout=15)
                 sent += 1
                 logger.info(f"memory5: 归档通知已发送 {sc}")
             except Exception as exc:
@@ -1709,7 +1709,7 @@ class Memory5(Star):
             if not chain.chain:
                 continue
             try:
-                await self.context.send_message(umo, chain)
+                await asyncio.wait_for(self.context.send_message(umo, chain), timeout=15)
                 task["last_sent"] = key
                 finished = str(task.get("kind")) == "once"
                 if str(task.get("kind")) == "daily":
@@ -1924,7 +1924,7 @@ class Memory5(Star):
                     chain = MessageChain()
                     chain.chain = [Plain(f"⏰ 提醒：{entry.get('text', '')}")]
                     try:
-                        await self.context.send_message(umo, chain)
+                        await asyncio.wait_for(self.context.send_message(umo, chain), timeout=15)
                         sent.append(key)
                         entry["sent"] = sent
                         changed = True
@@ -1961,6 +1961,77 @@ class Memory5(Star):
         return None
 
     # --------------------------------------------------------------- init
+
+    def _balance_state_path(self) -> str:
+        return os.path.join(MEM_ROOT, "balance_state.json")
+
+    def _fetch_balance(self, key: str):
+        import urllib.request
+
+        req = urllib.request.Request(
+            "https://api.deepseek.com/user/balance",
+            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        infos = data.get("balance_infos") or []
+        if not infos:
+            return None
+        item = infos[0]
+        return float(item.get("total_balance") or 0), str(item.get("currency") or "CNY")
+
+    async def _balance_tick(self) -> None:
+        if not bool(self._get("balance_enable", False)):
+            return
+        key = str(self._get("balance_api_key", "") or os.environ.get("DEEPSEEK_API_KEY", "")).strip()
+        if not key:
+            logger.debug("memory5: 余额提醒未配置 API Key，跳过")
+            return
+        try:
+            result = await asyncio.to_thread(self._fetch_balance, key)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"memory5: 查询余额失败 {type(exc).__name__}: {exc}")
+            return
+        if not result:
+            return
+        total, currency = result
+        threshold = float(self._get("balance_threshold", 10.0) or 10.0)
+        admin = str(self._get("balance_admin_qq", "")).strip()
+        if not admin:
+            admins = self.admin_qqs()
+            admin = admins[0] if admins else ""
+        state = read_json(self._balance_state_path(), {}) or {}
+        if total >= threshold:
+            if state.get("alerted"):
+                write_plain_json(self._balance_state_path(), {"alerted": False, "total": total})
+            return
+        if state.get("alerted"):
+            return
+        if not admin:
+            logger.warning("memory5: 余额低于阈值，但没有配置接收提醒的管理员 QQ")
+            return
+        umo = self._umo_for(f"private:{admin}")
+        if not umo:
+            logger.warning("memory5: 余额提醒找不到管理员私聊会话，等下次消息后再试")
+            return
+        try:
+            chain = MessageChain().message(f"余额提醒：当前 {total:.2f} {currency}，低于设定值 {threshold:.2f} 元。")
+            await asyncio.wait_for(self.context.send_message(umo, chain), timeout=15)
+            write_plain_json(self._balance_state_path(), {"alerted": True, "total": total})
+            logger.info(f"memory5: 已给管理员发送余额提醒 {total:.2f} {currency}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"memory5: 余额提醒发送失败 {type(exc).__name__}: {exc}")
+
+    async def _balance_loop(self) -> None:
+        await asyncio.sleep(30)
+        while True:
+            try:
+                await self._balance_tick()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"memory5: 余额循环跳过 {type(exc).__name__}: {exc}")
+            hours = max(1, self._int("balance_check_hours", 6))
+            await asyncio.sleep(hours * 3600)
+
     async def initialize(self) -> None:
         try:
             moved = migrate_legacy_layout()
@@ -2001,6 +2072,7 @@ class Memory5(Star):
             logger.info("memory5: 检测到手动归档开关，稍后执行一次")
             asyncio.create_task(self._delayed_archive())
         asyncio.create_task(self._prewarm_cache())
+        asyncio.create_task(self._balance_loop())
         if self._extract_task is None or self._extract_task.done():
             self._extract_task = asyncio.create_task(self._extract_loop())
         if self._task is None or self._task.done():
