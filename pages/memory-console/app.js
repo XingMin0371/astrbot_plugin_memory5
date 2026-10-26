@@ -1161,8 +1161,7 @@ async function loadHealth(show = false) {
     .join("<br>") || "缓存为空";
 
   box.innerHTML =
-    `<div class="item"><b>版本</b><span>v${data.version || "-"}</span></div>`
-    + `<div class="item"><b>心跳</b><span>${hbText}</span></div>`
+    `<div class="item"><b>版本</b><span>v${data.version || "-"} · ${hbText}</span></div>`
     + `<div class="item"><b>会话</b><span>${scopes.length} 个（群/私聊）</span>`
     + `<span class="muted">${scopeText}</span></div>`
     + `<div class="item"><b>加密</b><span>${enc.mode || "-"}（${enc.format || "-"}）</span>`
