@@ -2153,6 +2153,23 @@ class Memory5(Star):
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"memory5: 写主人长期记忆失败 {type(exc).__name__}: {exc}")
 
+
+    async def _clear_admins_after_empty(self) -> None:
+        await asyncio.sleep(3)
+        if self._admin_configured():
+            return
+        state = self._admin_state()
+        authorized = [str(x) for x in state.get("authorized", [])]
+        if not authorized:
+            return
+        for qq in authorized:
+            await self._send_private(qq, "管理员权限已移除：配置中已删除这个账号。")
+        state["authorized"] = []
+        state["pending"] = {}
+        state["missing"] = {}
+        self._save_admin_state(state)
+        logger.info("memory5: 管理员配置为空，已撤销原授权")
+
     async def _admin_sync(self) -> None:
         desired = self._admin_configured()
         state = self._admin_state()
@@ -2197,7 +2214,9 @@ class Memory5(Star):
                 missing.pop(qq, None)
                 logger.info(f"memory5: 已移除管理员 {qq} 并发送通知")
         else:
-            logger.debug("memory5: 管理员配置为空，保留已授权状态，等待配置稳定")
+            task = getattr(self, "_empty_task", None)
+            if task is None or task.done():
+                self._empty_task = asyncio.create_task(self._clear_admins_after_empty())
         for qq in desired:
             missing.pop(qq, None)
 
