@@ -113,6 +113,20 @@ def record_umo(scope: str, umo: str) -> None:
 _SYSTEM_MARKERS = ("已确认授权", "管理员授权验证", "管理员权限已移除", "已确认授权：")
 
 
+def _normalize_system_text(text: str) -> str:
+    return str(text or "").strip().strip("[]【】「」 ").strip()
+
+
+def _is_system_text(text: str) -> bool:
+    norm = _normalize_system_text(text)
+    if norm == "已确认授权":
+        return True
+    for prefix in ("管理员授权验证：", "管理员权限已移除：", "已确认授权："):
+        if str(text or "").strip().startswith(prefix):
+            return True
+    return False
+
+
 def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
@@ -150,7 +164,7 @@ def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
 
-VERSION = "2.1.12beta1"
+VERSION = "2.1.12beta3"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -776,7 +790,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12beta1")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12beta3")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -931,7 +945,7 @@ class Memory5(Star):
             if not scope or scope not in self.scopes:
                 return
             text = (event.message_str or "").strip()
-            if any(marker in text for marker in _SYSTEM_MARKERS):
+            if _is_system_text(text):
                 return
             sender = str(event.get_sender_id())
             self_ids = {str(x) for x in self.bot_qqs()}
@@ -2044,7 +2058,7 @@ class Memory5(Star):
     def _ensure_owner_memory(self, qq: str) -> None:
         try:
             core = read_text(scope_paths(f"private:{qq}")["core"])
-            if str(qq) in core and "的主人" in core:
+            if str(qq) in core and "的管理员" in core:
                 return
         except Exception:  # noqa: BLE001
             pass
@@ -2056,14 +2070,14 @@ class Memory5(Star):
         name = str(self._get("bot_name", "鱼鱼") or "鱼鱼")
         bots = sorted(self.bot_qqs())
         bot_qq = bots[0] if bots else ""
-        text = f"{name}({bot_qq}) 的主人" if bot_qq else f"{name} 的主人"
+        text = f"{name}({bot_qq}) 的管理员" if bot_qq else f"{name} 的管理员"
         scope = f"private:{qq}"
         try:
             ensure_dir(scope_dir(scope))
             self._write_core(scope, {
                 "topic": "主人", "subject": str(qq), "text": text, "date": day_str(),
             })
-            logger.info(f"memory5: 已在长期记忆记录 {qq} 是 {name} 的主人")
+            logger.info(f"memory5: 已在长期记忆记录 {qq} 是 {name} 的管理员")
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"memory5: 写主人长期记忆失败 {type(exc).__name__}: {exc}")
 
@@ -2109,13 +2123,8 @@ class Memory5(Star):
 
     async def _admin_auth_listener(self, event: AstrMessageEvent) -> None:
         text = (event.message_str or "").strip()
-        if "已确认授权" not in text:
+        if _normalize_system_text(text) != "已确认授权":
             return
-        event.stop_event()
-        try:
-            event.should_call_llm(False)
-        except Exception:  # noqa: BLE001
-            pass
         sender = str(event.get_sender_id())
         if not getattr(event, "is_private_chat", lambda: True)():
             return
@@ -2123,6 +2132,11 @@ class Memory5(Star):
         pending = state.get("pending", {})
         if sender not in pending:
             return
+        event.stop_event()
+        try:
+            event.should_call_llm(False)
+        except Exception:  # noqa: BLE001
+            pass
         authorized = set(str(x) for x in state.get("authorized", []))
         authorized.add(sender)
         pending.pop(sender, None)

@@ -1,4 +1,33 @@
 {
+  "permission": {
+    "description": "权限",
+    "hint": "谁可以管理，谁的消息不记。",
+    "type": "object",
+    "items": {
+      "admin_qqs": {
+        "description": "管理员 QQ",
+        "hint": "拥有查看全部日记与使用重要级命令的权限。",
+        "type": "list",
+        "default": [
+          "REDACTED_USER"
+        ]
+      },
+      "bot_qqs": {
+        "description": "机器人 QQ",
+        "hint": "机器人自身账号，用于识别自身消息。",
+        "type": "list",
+        "default": [
+          "REDACTED_BOT"
+        ]
+      },
+      "blacklist_qqs": {
+        "description": "黑名单 QQ",
+        "hint": "该名单内账号的消息不会被记录。",
+        "type": "list",
+        "default": []
+      }
+    }
+  },
   "basic": {
     "description": "基础",
     "hint": "总开关、归档、注入。",
@@ -30,31 +59,6 @@
       }
     }
   },
-  "permission": {
-    "description": "权限",
-    "hint": "谁可以管理，谁的消息不记。",
-    "type": "object",
-    "items": {
-      "admin_qqs": {
-        "description": "管理员 QQ",
-        "hint": "拥有查看全部日记与使用重要级命令的权限。",
-        "type": "list",
-        "default": []
-      },
-      "bot_qqs": {
-        "description": "机器人 QQ",
-        "hint": "机器人自身账号，用于识别自身消息。",
-        "type": "list",
-        "default": []
-      },
-      "blacklist_qqs": {
-        "description": "黑名单 QQ",
-        "hint": "该名单内账号的消息不会被记录。",
-        "type": "list",
-        "default": []
-      }
-    }
-  },
   "archive": {
     "description": "归档",
     "hint": "什么时候整理、记录哪些会话、通知发到哪。",
@@ -70,13 +74,19 @@
         "description": "记录的会话",
         "hint": "需要归档的会话，格式 group:群号 或 private:QQ号。",
         "type": "list",
-        "default": []
+        "default": [
+          "group:REDACTED_GROUP",
+          "private:REDACTED_USER"
+        ]
       },
       "notify_scopes": {
         "description": "归档通知发到",
         "hint": "归档完成后向这些会话发送提示。",
         "type": "list",
-        "default": []
+        "default": [
+          "private:REDACTED_USER",
+          "group:REDACTED_GROUP"
+        ]
       },
       "notify_quiet_ranges": {
         "description": "免打扰时段",
