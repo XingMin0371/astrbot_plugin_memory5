@@ -1101,6 +1101,11 @@ async function loadHealth(show = false) {
   let data = {};
   try {
     data = unwrap(await apiGet("health")) || {};
+    try {
+      const latest = unwrap(await apiGet("selfcheck/latest")) || {};
+      if (latest.path && $("selfcheckOut")) $("selfcheckOut").textContent = `上次自检：${latest.path}`;
+    } catch (_) {}
+
   } catch (err) {
     if (btn) btn.disabled = false;
     if (show) {

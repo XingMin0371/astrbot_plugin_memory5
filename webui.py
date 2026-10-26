@@ -760,11 +760,33 @@ class _TasksMixin:
             add("磁盘剩余", False, type(exc).__name__)
 
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        log_path = os.path.join(os.path.dirname(MEM_ROOT), f"selfcheck-{stamp}.log")
+        base = os.path.dirname(MEM_ROOT)
+        log_path = os.path.join(base, f"selfcheck-{stamp}.log")
         with open(log_path, "w", encoding="utf-8") as fh:
             fh.write("memory5 自检 " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
             fh.write("\n".join(lines) + "\n")
+        try:
+            open(os.path.join(base, "selfcheck-latest.txt"), "w", encoding="utf-8").write(log_path)
+            cutoff = time.time() - 15 * 86400
+            for name in os.listdir(base):
+                if not (name.startswith("selfcheck-") and name.endswith(".log")):
+                    continue
+                full = os.path.join(base, name)
+                if os.path.getmtime(full) < cutoff:
+                    os.remove(full)
+        except OSError:
+            pass
         return jsonify({"status": "ok", "data": {"ok": ok, "path": log_path, "lines": lines}})
+
+
+    async def selfcheck_latest(self):
+        base = os.path.dirname(MEM_ROOT)
+        path = ""
+        try:
+            path = open(os.path.join(base, "selfcheck-latest.txt"), encoding="utf-8").read().strip()
+        except OSError:
+            pass
+        return jsonify({"status": "ok", "data": {"path": path, "exists": bool(path and os.path.isfile(path))}})
 
     async def health(self):
         from .main import VERSION, refresh_index
@@ -860,6 +882,7 @@ class Memory5WebUI(_TasksMixin):
             ("/memory5/aliases-delete", self.aliases_delete, ["POST"], "删除别名"),
             ("/memory5/health", self.health, ["GET"], "健康状态"),
             ("/memory5/selfcheck", self.selfcheck, ["POST"], "自检"),
+            ("/memory5/selfcheck/latest", self.selfcheck_latest, ["GET"], "自检记录"),
             ("/memory5/export-history", self.export_history, ["GET"], "导出历史"),
             ("/memory5/export-history-clear", self.export_history_clear, ["POST"], "清空导出历史"),
             ("/memory5/trash-clear", self.trash_clear, ["POST"], "清空回收站"),
