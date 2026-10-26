@@ -13,6 +13,7 @@
 - 授权后长期记忆改写为「XX 是 鱼鱼(QQ) 的管理员」
 - 自检路径写入 `selfcheck-latest.txt`，面板打开就能看到；自检日志超过 15 天自动删除
 - 健康检查改为每 3 分钟一次，仍为 8 秒超时、连续 3 次失败重启、启动 8 分钟内不触发
+- 健康检查写入 `/var/lib/astrbot-healthcheck/status` 和 `/var/log/astrbot-healthcheck.log`；依赖安装期间显示 `installing`，不再静默跳过
 
 **优化**
 
