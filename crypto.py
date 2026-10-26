@@ -43,15 +43,25 @@ except Exception:  # pragma: no cover - 缺依赖时退化为明文
     hashes = None  # type: ignore[assignment]
 
 def guess_data_dir() -> str:
-    """推断数据目录：环境变量优先，其次按插件所在位置（<data>/plugins/memory5）。"""
+    """推断数据目录：环境变量 → 向上找 plugins → AstrBot API → 插件同级。"""
     env = os.environ.get("MEMORY5_DATA")
     if env:
         return env
     here = os.path.dirname(os.path.abspath(__file__))
-    plugins_dir = os.path.dirname(here)
-    if os.path.basename(plugins_dir) == "plugins":
-        return os.path.dirname(plugins_dir)
-    return "/AstrBot/data"
+    cur = here
+    for _ in range(8):
+        if os.path.basename(cur) == "plugins":
+            return os.path.dirname(cur)
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    try:
+        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+        return os.path.realpath(get_astrbot_data_path())
+    except Exception:  # noqa: BLE001
+        pass
+    return os.path.dirname(here)
 
 
 DATA_DIR = guess_data_dir()
@@ -60,7 +70,8 @@ PLUGIN_DATA_DIR = os.environ.get(
     "MEMORY5_PLUGIN_DIR",
     os.path.join(DATA_DIR, "plugin_data", "astrbot_plugin_memory5"),
 )
-KEY_PATH = os.environ.get("MEMORY5_KEY_FILE", os.path.join(PLUGIN_DATA_DIR, ".memory5.key"))
+KEY_DIR = os.environ.get("MEMORY5_KEY_DIR", os.path.join(PLUGIN_DATA_DIR, "keys"))
+KEY_PATH = os.environ.get("MEMORY5_KEY_FILE", os.path.join(KEY_DIR, "memory5.key"))
 MEM_ROOT = os.path.join(PLUGIN_DATA_DIR, "memory5")
 
 
@@ -87,15 +98,21 @@ def migrate_legacy_layout() -> int:
             os.rmdir(old_root)
         except OSError:
             pass
+    os.makedirs(KEY_DIR, exist_ok=True)
     for suffix in ("", ".old", ".next", ".invalid"):
-        old_key = os.path.join(DATA_DIR, ".memory5.key" + suffix)
         new_key = KEY_PATH + suffix
-        if os.path.exists(old_key) and not os.path.exists(new_key):
-            try:
-                shutil.move(old_key, new_key)
-                moved += 1
-            except OSError:
-                continue
+        for old_key in (
+            os.path.join(DATA_DIR, ".memory5.key" + suffix),
+            os.path.join(PLUGIN_DATA_DIR, ".memory5.key" + suffix),
+            os.path.join(DATA_DIR, "plugin_data", ".memory5_keys", "memory5.key" + suffix),
+        ):
+            if os.path.exists(old_key) and not os.path.exists(new_key):
+                try:
+                    shutil.move(old_key, new_key)
+                    moved += 1
+                    break
+                except OSError:
+                    continue
     return moved
 
 
