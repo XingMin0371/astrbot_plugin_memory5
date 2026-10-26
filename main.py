@@ -161,7 +161,7 @@ def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
 
-VERSION = "2.1.12beta3"
+VERSION = "2.1.12beta4"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -787,7 +787,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12beta3")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.1.12beta4")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -2152,6 +2152,26 @@ class Memory5(Star):
                 logger.debug(f"memory5: 管理员授权检查跳过 {type(exc).__name__}: {exc}")
             await asyncio.sleep(60)
 
+
+    def _heartbeat_path(self) -> str:
+        return os.path.join(MEM_ROOT, "heartbeat.json")
+
+    async def _heartbeat_loop(self) -> None:
+        expected = time.monotonic() + 30
+        while True:
+            await asyncio.sleep(30)
+            now_mono = time.monotonic()
+            lag = max(0.0, now_mono - expected)
+            expected = now_mono + 30
+            if lag > 5:
+                logger.warning(f"memory5: 事件循环延迟 {lag:.1f}s，可能有阻塞操作")
+            try:
+                write_plain_json(self._heartbeat_path(), {
+                    "ts": time.time(), "lag": round(lag, 2), "version": VERSION,
+                })
+            except OSError as exc:
+                logger.debug(f"memory5: 心跳写入失败 {type(exc).__name__}: {exc}")
+
     async def initialize(self) -> None:
         try:
             moved = migrate_legacy_layout()
@@ -2192,6 +2212,7 @@ class Memory5(Star):
             logger.info("memory5: 检测到手动归档开关，稍后执行一次")
             asyncio.create_task(self._delayed_archive())
         asyncio.create_task(self._prewarm_cache())
+        asyncio.create_task(self._heartbeat_loop())
         asyncio.create_task(self._admin_loop())
         if self._extract_task is None or self._extract_task.done():
             self._extract_task = asyncio.create_task(self._extract_loop())

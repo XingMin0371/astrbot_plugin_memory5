@@ -718,6 +718,12 @@ class _TasksMixin:
         except Exception:  # noqa: BLE001
             pass
         try:
+            hb = read_json(os.path.join(MEM_ROOT, "heartbeat.json"), {}) or {}
+            age = time.time() - float(hb.get("ts") or 0)
+            add("心跳", age < 120 and float(hb.get("lag") or 0) < 10, f"{age:.0f}s 前 / 延迟 {hb.get('lag', 0)}s")
+        except Exception:  # noqa: BLE001
+            add("心跳", False, "读取失败")
+        try:
             add("会话数", True, str(len(getattr(self.plugin, "scopes", []))))
             state = self.plugin._admin_state()
             add("管理员", True, f"已授权 {len(state.get('authorized', []))} / 待确认 {len(state.get('pending', {}))}")
@@ -792,8 +798,12 @@ class _TasksMixin:
         from .main import VERSION, refresh_index
 
         now_ts = time.time()
+        hb = read_json(os.path.join(MEM_ROOT, "heartbeat.json"), {})
+        hb = dict(hb) if isinstance(hb, dict) else {}
+        hb["age"] = round(now_ts - float(hb.get("ts") or 0), 1) if hb.get("ts") else None
         cached = self._health_cache.get("data")
         if cached and now_ts - float(self._health_cache.get("ts") or 0) < 20:
+            cached["heartbeat"] = hb
             return jsonify({"status": "ok", "data": cached})
 
         cache = {}
@@ -855,6 +865,7 @@ class _TasksMixin:
             "scopes": scopes,
             "backup": {"policy": policy, "last_verify": verify},
         }
+        payload["heartbeat"] = hb
         self._health_cache = {"ts": now_ts, "data": payload}
         return jsonify({"status": "ok", "data": payload})
 
