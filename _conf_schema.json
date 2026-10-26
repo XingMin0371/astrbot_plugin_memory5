@@ -541,42 +541,5 @@
         "default": "不重置"
       }
     }
-  },
-  "balance": {
-    "description": "余额提醒",
-    "hint": "只给管理员私聊发一次，默认关闭。",
-    "type": "object",
-    "items": {
-      "enable": {
-        "description": "启用余额提醒",
-        "hint": "开启后按周期查 DeepSeek 余额",
-        "type": "bool",
-        "default": false
-      },
-      "admin_qq": {
-        "description": "接收提醒的 QQ",
-        "hint": "只发私聊；留空则用管理员 QQ 的第一个",
-        "type": "string",
-        "default": ""
-      },
-      "threshold": {
-        "description": "提醒阈值（元）",
-        "hint": "余额低于这个值发一次，支持两位小数",
-        "type": "float",
-        "default": 10.0
-      },
-      "api_key": {
-        "description": "余额 API Key",
-        "hint": "留空读环境变量 DEEPSEEK_API_KEY",
-        "type": "string",
-        "default": ""
-      },
-      "check_hours": {
-        "description": "检查间隔（小时）",
-        "hint": "默认 6 小时查一次",
-        "type": "int",
-        "default": 6
-      }
-    }
   }
 }
