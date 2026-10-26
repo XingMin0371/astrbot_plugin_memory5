@@ -110,9 +110,6 @@ def record_umo(scope: str, umo: str) -> None:
         data[scope] = umo
         write_plain_json(_umos_path(), data)
 
-_SYSTEM_MARKERS = ("已确认授权", "管理员授权验证", "管理员权限已移除", "已确认授权：")
-
-
 def _normalize_system_text(text: str) -> str:
     return str(text or "").strip().strip("[]【】「」 ").strip()
 
