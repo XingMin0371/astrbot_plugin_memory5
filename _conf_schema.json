@@ -8,17 +8,13 @@
         "description": "管理员 QQ",
         "hint": "拥有查看全部日记与使用重要级命令的权限。",
         "type": "list",
-        "default": [
-          "REDACTED_USER"
-        ]
+        "default": []
       },
       "bot_qqs": {
         "description": "机器人 QQ",
         "hint": "机器人自身账号，用于识别自身消息。",
         "type": "list",
-        "default": [
-          "REDACTED_BOT"
-        ]
+        "default": []
       },
       "blacklist_qqs": {
         "description": "黑名单 QQ",
