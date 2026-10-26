@@ -32,7 +32,7 @@ def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-_SCOPE_RE = re.compile(r"^(group|private):\d{5,20}$")
+_SCOPE_RE = re.compile(r"^(group|private):[A-Za-z0-9_-]{1,64}$")
 _DAY_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})$")
 
 
@@ -583,7 +583,7 @@ class _TasksMixin:
         scope = str(body.get("scope", "")).strip()
         qq = str(body.get("qq", "")).strip()
         old = str(body.get("old", "")).strip()
-        new = str(body.get("new", "")).strip()
+        new = str(body.get("new", "")).strip()[:32]
         try:
             confidence = float(body.get("confidence"))
         except (TypeError, ValueError):

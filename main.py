@@ -92,6 +92,24 @@ except ImportError:  # 单文件方式加载（本地测试）
     )
 
 
+
+def _umos_path() -> str:
+    return os.path.join(MEM_ROOT, "umos.json")
+
+
+def load_umos() -> dict:
+    data = read_json(_umos_path(), {})
+    return data if isinstance(data, dict) else {}
+
+
+def record_umo(scope: str, umo: str) -> None:
+    if not umo or not scope:
+        return
+    data = load_umos()
+    if data.get(scope) != umo:
+        data[scope] = umo
+        write_plain_json(_umos_path(), data)
+
 def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
@@ -115,7 +133,7 @@ DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
 TZ = timezone(timedelta(hours=8))
 
 
-_SCOPE_RE = re.compile(r"^(group|private):\d{5,20}$")
+_SCOPE_RE = re.compile(r"^(group|private):[A-Za-z0-9_-]{1,64}$")
 
 
 def scope_dir(scope: str) -> str:
@@ -607,6 +625,33 @@ def raw_since(scope: str, cursor: dict, limit: int = 200) -> list[dict]:
     return rows[:limit]
 
 
+
+def _parse_model_items(raw: str) -> list[dict]:
+    """尽量从不同模型的输出里抠出条目数组：纯 JSON、代码块、包在对象里都试。"""
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
+    text = re.sub(r"\s*```$", "", text).strip()
+    candidates = [text]
+    match = re.search(r"\[.*\]", text, re.S)
+    if match:
+        candidates.append(match.group(0))
+    for chunk in candidates:
+        try:
+            data = json.loads(chunk)
+        except ValueError:
+            continue
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        if isinstance(data, dict):
+            for key in ("items", "entries", "memories", "data", "list"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return [x for x in value if isinstance(x, dict)]
+            return [data]
+    return []
+
 def merge_from_db(scope: str, since_ts: str) -> int:
     """群聊补一份 AstrBot 历史记录：适配器不上报机器人自己的消息，靠这个补齐。
     顺手把没采集到的消息写进 raw，保证下次游标推进后不丢。"""
@@ -625,7 +670,10 @@ def merge_from_db(scope: str, since_ts: str) -> int:
         except ValueError:
             since_utc = ""
     try:
-        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=10)
+        db_uri = f"file:{DB_PATH}?mode=ro"
+        if os.name == "nt":
+            db_uri = "file:/" + DB_PATH.replace("\\", "/") + "?mode=ro"
+        con = sqlite3.connect(db_uri, uri=True, timeout=10)
         cur = con.cursor()
         cur.execute(
             "SELECT created_at, sender_id, sender_name, content FROM platform_message_history "
@@ -854,9 +902,13 @@ class Memory5(Star):
         if len(parts) >= 3:
             kind = parts[1]
             if kind == "GroupMessage":
-                return f"group:{parts[2]}"
-            if kind == "FriendMessage":
-                return f"private:{event.get_sender_id()}"
+                scope = f"group:{parts[2]}"
+            elif kind == "FriendMessage":
+                scope = f"private:{event.get_sender_id()}"
+            else:
+                return None
+            record_umo(scope, umo)
+            return scope
         return None
 
     # ------------------------------------------------------------ collector
@@ -1196,16 +1248,7 @@ class Memory5(Star):
         except Exception as exc:
             logger.warning(f"memory5: 抽取失败 {type(exc).__name__}: {exc}")
             return []
-        match = re.search(r"\[.*\]", raw, re.S)
-        if not match:
-            logger.warning(f"memory5: 模型输出没有 JSON 数组，前 200 字：{raw[:200]!r}")
-            return []
-        try:
-            items = json.loads(match.group(0))
-        except ValueError:
-            logger.warning(f"memory5: JSON 解析失败，前 200 字：{match.group(0)[:200]!r}")
-            return []
-        return items if isinstance(items, list) else []
+        return _parse_model_items(raw)
 
     async def extract_scope(self, scope: str) -> int:
         """一次归档把积压的消息分批处理完（默认最多 8 批 × 200 条）。"""
@@ -1905,9 +1948,12 @@ class Memory5(Star):
             if changed:
                 write_jsonl(path, rows)
 
-    @staticmethod
-    def _umo_for(scope: str) -> str | None:
-        platform = os.environ.get("MEMORY5_PLATFORM", "snowluma")
+    def _umo_for(self, scope: str) -> str | None:
+        """优先用收到消息时记录的真实 UMO，其次按平台名拼。"""
+        known = load_umos().get(str(scope))
+        if known:
+            return known
+        platform = os.environ.get("MEMORY5_PLATFORM", "aiocqhttp")
         if scope.startswith("group:"):
             return f"{platform}:GroupMessage:{scope.split(':', 1)[1]}"
         if scope.startswith("private:"):
