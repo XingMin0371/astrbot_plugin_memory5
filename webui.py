@@ -45,8 +45,7 @@ def scope_dir(scope: str) -> str:
 # 统一走 crypto 的加密读写，别让面板绕过加密层
 try:
     from .crypto import (  # noqa: F401
-        append_jsonl_row,
-        read_json,
+            read_json,
         read_jsonl,
         read_text,
         write_json,
