@@ -1314,7 +1314,8 @@ class Memory5(Star):
         return len(cjk) + len(words) + len(digits), set(cjk + words + digits)
 
     def _filter_low_density(self, rows: list[dict]) -> tuple[list[dict], int]:
-        """归档前丢掉过短且几乎无关联的闲聊，减少压缩 Token。"""
+        """归档前丢掉低密度或与前后文几乎无关联的内容。"""
+        self._filter_stats = {"density": 0, "relevance": 0}
         if not bool(self._get("filter_low_density", True)):
             return rows, 0
         try:
@@ -1323,7 +1324,7 @@ class Memory5(Star):
             min_units = 4
         keep_words = ("提醒", "记得", "别忘", "地址", "电话", "医院", "药", "钱",
                       "生日", "喜欢", "讨厌", "几点", "日期", "考试", "作业", "上班",
-                      "发烧", "难受", "不舒服",
+                      "发烧", "难受", "不舒服", "见面", "身份证", "医保",
                       "remind", "remember", "address", "phone", "hospital", "medicine",
                       "money", "birthday", "exam", "date", "meeting", "work")
         fillers = {"嗯", "哦", "噢", "啊", "好", "好的", "行", "可以", "收到",
@@ -1332,11 +1333,15 @@ class Memory5(Star):
                    "hi", "hello", "good"}
         texts = [str(r.get("text", "")).replace("\n", " ").strip() for r in rows]
         tokens = [self._density_units(t) for t in texts]
+        all_tokens = set()
+        for _units, chars in tokens:
+            all_tokens |= chars
         out, removed = [], 0
         for idx, row in enumerate(rows):
             text = texts[idx]
             if not text:
                 removed += 1
+                self._filter_stats["density"] += 1
                 continue
             lowered = text.lower()
             if any(word in lowered for word in keep_words):
@@ -1344,17 +1349,27 @@ class Memory5(Star):
                 continue
             if lowered in fillers or re.fullmatch(r"[\W\d_]+", text) or len(set(text)) == 1:
                 removed += 1
+                self._filter_stats["density"] += 1
                 continue
             units, chars = tokens[idx]
-            if units >= min_units:
+            ratio = len(chars) / max(1, units)
+            others = all_tokens - chars
+            related = bool(chars & others)
+            # 长消息也可能低密度：复读、词汇重复、有效字符占比低
+            if ratio < 0.35:
+                removed += 1
+                self._filter_stats["density"] += 1
+                continue
+            if units < min_units:
+                if not related:
+                    removed += 1
+                    self._filter_stats["relevance"] += 1
+                    continue
                 out.append(row)
                 continue
-            neighbors = ""
-            for j in (idx - 1, idx + 1):
-                if 0 <= j < len(texts):
-                    neighbors += texts[j].lower()
-            if chars and not any(c in neighbors for c in chars):
+            if units < max(8, min_units * 2) and not related:
                 removed += 1
+                self._filter_stats["relevance"] += 1
                 continue
             out.append(row)
         return out, removed
@@ -1367,7 +1382,8 @@ class Memory5(Star):
             return []
         rows, removed = self._filter_low_density(rows[-150:])
         if removed:
-            logger.info(f"memory5: 归档前过滤低密度消息 {removed} 条")
+            stats = getattr(self, "_filter_stats", {})
+            logger.info(f"memory5: 归档前过滤 {removed} 条（低密度 {stats.get('density', 0)}，低关联 {stats.get('relevance', 0)}）")
         lines = []
         for row in rows:
             text = str(row.get("text", "")).replace("\n", " ").strip()

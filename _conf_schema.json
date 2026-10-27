@@ -121,7 +121,7 @@
       },
       "filter_low_density": {
         "description": "归档前过滤低密度消息",
-        "hint": "默认开启：归档压缩前先丢弃过短、几乎无关联的闲聊，节省 Token",
+        "hint": "默认开启：归档压缩前丢弃复读、词汇重复、过短或与前后文无共同词的内容，节省 Token",
         "type": "bool",
         "default": true
       },
