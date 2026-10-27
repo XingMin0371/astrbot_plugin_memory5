@@ -118,6 +118,18 @@
         "hint": "每日最多发送的归档通知条数。",
         "type": "int",
         "default": 2
+      },
+      "filter_low_density": {
+        "description": "归档前过滤低密度消息",
+        "hint": "默认开启：归档压缩前先丢弃过短、几乎无关联的闲聊，节省 Token",
+        "type": "bool",
+        "default": true
+      },
+      "low_density_min_chars": {
+        "description": "低密度判定字数",
+        "hint": "少于这个字数且与前后文几乎无关联的消息会被过滤，默认 4",
+        "type": "int",
+        "default": 4
       }
     }
   },
