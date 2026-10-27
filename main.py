@@ -1457,10 +1457,17 @@ class Memory5(Star):
             return True
         return False
 
+    def _should_filter_density(self) -> bool:
+        if not bool(self._get("filter_low_density", True)):
+            return False
+        if bool(self._get("filter_low_density_night_only", True)):
+            return 0 <= now().hour < 6
+        return True
+
     def _filter_low_density(self, rows: list[dict]) -> tuple[list[dict], int]:
         """归档前丢掉低密度、重复或与前后文几乎无关联的内容。"""
         self._filter_stats = {"density": 0, "relevance": 0}
-        if not bool(self._get("filter_low_density", True)):
+        if not self._should_filter_density():
             return rows, 0
         try:
             min_units = max(1, min(int(self._get("low_density_min_chars", 4)), 20))
