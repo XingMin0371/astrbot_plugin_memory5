@@ -2152,7 +2152,7 @@ class Memory5(Star):
 
 
     async def _clear_admins_after_empty(self) -> None:
-        await asyncio.sleep(3)
+        await asyncio.sleep(30)
         if self._admin_configured():
             return
         state = self._admin_state()
