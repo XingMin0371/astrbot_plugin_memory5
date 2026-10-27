@@ -245,9 +245,11 @@ function fillDaySelect(days) {
   const today = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const max = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  const yesterdayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  const yesterday = `${yesterdayDate.getFullYear()}-${pad(yesterdayDate.getMonth() + 1)}-${pad(yesterdayDate.getDate())}`;
   if (input) {
     input.max = max;
-    input.value = max;
+    input.value = days && days.includes(max) ? max : yesterday;
   }
   if (input && all) input.disabled = all.checked;
   return currentDay();
