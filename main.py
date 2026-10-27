@@ -20,6 +20,7 @@ import re
 import shutil
 import sqlite3
 import time
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -177,7 +178,7 @@ def encrypt_existing_storage() -> int:
     """把已有记忆迁移到当前加密档位。"""
     return encrypt_tree(MEM_ROOT)
 
-VERSION = "2.2.2"
+VERSION = "2.2.3"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -838,14 +839,13 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.2.2")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.2.3")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
         self.config = config or {}
         self._flat = self._flatten(self.config)
-        self._cache: dict[str, tuple[float, str]] = {}
-        self._daily_cache: dict[str, tuple[float, list]] = {}
+        self._daily_cache: OrderedDict[str, tuple[float, list]] = OrderedDict()
         self._blocked_index: dict[str, list[str]] | None = None
         self._archiving = False
         self._suppress: dict[str, float] = {}
@@ -1086,10 +1086,14 @@ class Memory5(Star):
                 continue
             cached = self._daily_cache.get(path)
             if cached and cached[0] == mtime:
+                self._daily_cache.move_to_end(path)
                 rows.extend(cached[1])
                 continue
             data = read_jsonl(path)
             self._daily_cache[path] = (mtime, data)
+            self._daily_cache.move_to_end(path)
+            while len(self._daily_cache) > 128:
+                self._daily_cache.popitem(last=False)
             rows.extend(data)
         return rows
 

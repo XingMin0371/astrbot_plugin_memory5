@@ -2,7 +2,7 @@ name: astrbot_plugin_memory5
 display_name: 鱼鱼日记 · 如鱼所书
 short_desc: 把聊天整理成分层日记，省 Token 也不丢记忆
 desc: 群聊越聊越长，上下文越塞越满。这个插件把聊天整理成分层日记，只在需要时注入需要的那一点——省 Token、缓解上下文过长，同时不容易把重要的事忘掉。带提醒、定时任务、别名、回收站、三档加密和面板。
-version: v2.2.2
+version: v2.2.3
 author: DSH
 repo: https://github.com/XingMin0371/astrbot_plugin_memory5
 astrbot_version: ">=4.29.0"
