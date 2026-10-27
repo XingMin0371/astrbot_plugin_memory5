@@ -239,17 +239,23 @@ async function loadDays(scope) {
   return fillDaySelect(state.days);
 }
 
+function defaultDay(days, now = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const prev = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const yesterday = `${prev.getFullYear()}-${pad(prev.getMonth() + 1)}-${pad(prev.getDate())}`;
+  return days && days.includes(today) ? today : yesterday;
+}
+
 function fillDaySelect(days) {
   const input = $("day");
   const all = $("allDates");
   const today = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const max = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-  const yesterdayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-  const yesterday = `${yesterdayDate.getFullYear()}-${pad(yesterdayDate.getMonth() + 1)}-${pad(yesterdayDate.getDate())}`;
   if (input) {
     input.max = max;
-    input.value = days && days.includes(max) ? max : yesterday;
+    input.value = defaultDay(days, today);
   }
   if (input && all) input.disabled = all.checked;
   return currentDay();
