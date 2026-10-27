@@ -126,8 +126,8 @@
         "default": true
       },
       "low_density_min_chars": {
-        "description": "低密度判定字数",
-        "hint": "少于这个字数且与前后文几乎无关联的消息会被过滤，默认 4",
+        "description": "低密度判定单位",
+        "hint": "中文按字、英文按词、数字按段计数；少于该值且与前后文无关联的消息会被过滤，默认 4",
         "type": "int",
         "default": 4
       }
