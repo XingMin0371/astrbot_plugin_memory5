@@ -1314,7 +1314,7 @@ class Memory5(Star):
         return len(cjk) + len(words) + len(digits), set(cjk + words + digits)
 
     def _filter_low_density(self, rows: list[dict]) -> tuple[list[dict], int]:
-        """归档前丢掉低密度或与前后文几乎无关联的内容。"""
+        """归档前丢掉低密度、重复或与前后文几乎无关联的内容。"""
         self._filter_stats = {"density": 0, "relevance": 0}
         if not bool(self._get("filter_low_density", True)):
             return rows, 0
@@ -1324,7 +1324,11 @@ class Memory5(Star):
             min_units = 4
         keep_words = ("提醒", "记得", "别忘", "地址", "电话", "医院", "药", "钱",
                       "生日", "喜欢", "讨厌", "几点", "日期", "考试", "作业", "上班",
-                      "发烧", "难受", "不舒服", "见面", "身份证", "医保",
+                      "发烧", "难受", "不舒服", "见面", "身份证", "医保", "对象",
+                      "朋友", "家人", "同事", "领导", "老板", "爸", "妈", "哥", "姐", "弟", "妹",
+                      "开会", "项目", "约", "时间", "明天", "后天", "昨天", "今天",
+                      "裁员", "公司", "辞职", "面试", "工资", "合同", "生病", "住院",
+                      "搬家", "结婚", "分手", "成绩",
                       "remind", "remember", "address", "phone", "hospital", "medicine",
                       "money", "birthday", "exam", "date", "meeting", "work")
         fillers = {"嗯", "哦", "噢", "啊", "好", "好的", "行", "可以", "收到",
@@ -1336,6 +1340,7 @@ class Memory5(Star):
         all_tokens = set()
         for _units, chars in tokens:
             all_tokens |= chars
+        seen = set()
         out, removed = [], 0
         for idx, row in enumerate(rows):
             text = texts[idx]
@@ -1344,7 +1349,22 @@ class Memory5(Star):
                 self._filter_stats["density"] += 1
                 continue
             lowered = text.lower()
+            compact = re.sub(r"\s+", "", text)
+            # 系统提示、重复刷屏
+            if re.search(r"【[^】]*归档[^】]*】|^\[Poke\]$|^【.*】$|^[↑↓]?表情包分享$|^\[(图片|表情)\]$", text):
+                removed += 1
+                self._filter_stats["density"] += 1
+                continue
+            if compact in seen:
+                removed += 1
+                self._filter_stats["density"] += 1
+                continue
+            seen.add(compact)
             if any(word in lowered for word in keep_words):
+                out.append(row)
+                continue
+            # 人物、提问、时间、约定：保留，避免丢对象/事件
+            if re.search(r"[@?？]|\d{1,2}[:：]\d{2}|\d{1,2}[月/.-]\d{1,2}|周[一二三四五六日天]", text):
                 out.append(row)
                 continue
             if lowered in fillers or re.fullmatch(r"[\W\d_]+", text) or len(set(text)) == 1:
@@ -1356,7 +1376,7 @@ class Memory5(Star):
             others = all_tokens - chars
             related = bool(chars & others)
             # 长消息也可能低密度：复读、词汇重复、有效字符占比低
-            if ratio < 0.35:
+            if ratio <= 0.5:
                 removed += 1
                 self._filter_stats["density"] += 1
                 continue
@@ -1366,10 +1386,6 @@ class Memory5(Star):
                     self._filter_stats["relevance"] += 1
                     continue
                 out.append(row)
-                continue
-            if units < max(8, min_units * 2) and not related:
-                removed += 1
-                self._filter_stats["relevance"] += 1
                 continue
             out.append(row)
         return out, removed
