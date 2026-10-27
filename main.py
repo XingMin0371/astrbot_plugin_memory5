@@ -1092,7 +1092,7 @@ class Memory5(Star):
             data = read_jsonl(path)
             self._daily_cache[path] = (mtime, data)
             self._daily_cache.move_to_end(path)
-            while len(self._daily_cache) > 128:
+            while len(self._daily_cache) > 256:
                 self._daily_cache.popitem(last=False)
             rows.extend(data)
         return rows
