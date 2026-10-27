@@ -1337,9 +1337,30 @@ class Memory5(Star):
         return "\n\n".join(parts_out)
 
     @filter.on_llm_request()
+    def _clean_pending_context(self, req) -> int:
+        pending = getattr(self, "_pending_context_clean", None)
+        if not pending:
+            return 0
+        contexts = getattr(req, "contexts", None)
+        if not isinstance(contexts, list):
+            return 0
+        kept, removed = [], 0
+        for item in contexts:
+            text = self._context_text(item) if isinstance(item, dict) else ""
+            if text and self._normalize_compare(self._normalize_time(text)) in pending:
+                removed += 1
+                continue
+            kept.append(item)
+        self._pending_context_clean = set()
+        if removed:
+            req.contexts = kept
+            logger.info(f"memory5: 归档过滤项同步清理上下文 {removed} 条")
+        return removed
+
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         try:
             scope = self.scope_of(event)
+            self._clean_pending_context(req)
             if scope:
                 self._clean_context_low(req, scope)
             if not self.enabled_inject:
@@ -1523,6 +1544,11 @@ class Memory5(Star):
                 self._filter_stats["relevance"] += 1
                 continue
             out.append(row)
+        kept_ids = {id(row) for row in out}
+        self._last_filtered_texts = {
+            self._normalize_compare(self._normalize_time(str(row.get("text", ""))))
+            for row in rows if id(row) not in kept_ids
+        }
         return out, removed
 
     async def _summarize(self, rows: list[dict]) -> list[dict]:
@@ -1533,6 +1559,9 @@ class Memory5(Star):
             return []
         rows, removed = self._filter_low_density(rows[-150:])
         if removed:
+            pending = getattr(self, "_pending_context_clean", set())
+            pending |= getattr(self, "_last_filtered_texts", set())
+            self._pending_context_clean = pending
             stats = getattr(self, "_filter_stats", {})
             logger.info(f"memory5: 归档前过滤 {removed} 条（低密度 {stats.get('density', 0)}，低关联 {stats.get('relevance', 0)}）")
         lines = []

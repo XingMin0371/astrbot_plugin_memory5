@@ -252,8 +252,8 @@
         "default": true
       },
       "low_context_clean": {
-        "description": "同步清理上下文中的低密度内容",
-        "hint": "默认关闭。到低密度保留期后，从模型上下文里移除对应内容；不会删除日记",
+        "description": "额外清理原始对话上下文",
+        "hint": "默认关闭。日记里的低密度条目到期后本就不会再注入；这个开关只额外清理 AstrBot 原始对话上下文，不会删除日记",
         "type": "bool",
         "default": false
       }
