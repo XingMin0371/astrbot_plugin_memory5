@@ -1069,6 +1069,55 @@ class Memory5(Star):
         write_text(path, body + "\n")
 
     # ---------------------------------------------------------- injection
+    @staticmethod
+    def _context_text(item: dict) -> str:
+        content = item.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    parts.append(part["text"])
+            return "".join(parts).strip()
+        return ""
+
+    def _clean_context_low(self, req, scope: str) -> int:
+        """到保留期后，从请求上下文移除低密度/无效内容；不动日记文件。"""
+        if not bool(self._get("low_context_clean", False)):
+            return 0
+        try:
+            days = max(1, int(self._get("low_keep_days", 3)))
+        except (TypeError, ValueError):
+            days = 3
+        cutoff = (now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        base = scope_paths(scope)["daily_dir"]
+        low_text = set()
+        if os.path.isdir(base):
+            for name in os.listdir(base):
+                if not name.endswith(".jsonl") or name[:-6] >= cutoff:
+                    continue
+                for row in read_jsonl(os.path.join(base, name)):
+                    if row.get("tag") in ("低密度", "无效") and row.get("text"):
+                        low_text.add(str(row["text"]).strip())
+        if not low_text:
+            return 0
+        contexts = getattr(req, "contexts", None)
+        if not isinstance(contexts, list):
+            return 0
+        kept = []
+        removed = 0
+        for item in contexts:
+            text = self._context_text(item) if isinstance(item, dict) else ""
+            if text and text in low_text:
+                removed += 1
+                continue
+            kept.append(item)
+        if removed:
+            req.contexts = kept
+            logger.info(f"memory5: 上下文清理低密度/无效内容 {removed} 条")
+        return removed
+
     def _load_daily(self, scope: str, days: int) -> list[dict]:
         base = scope_paths(scope)["daily_dir"]
         if not os.path.isdir(base):
@@ -1287,10 +1336,12 @@ class Memory5(Star):
 
     @filter.on_llm_request()
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
-        if not self.enabled_inject:
-            return
         try:
             scope = self.scope_of(event)
+            if scope:
+                self._clean_context_low(req, scope)
+            if not self.enabled_inject:
+                return
             if not scope:
                 return
             block = self.build_block(scope, str(event.get_sender_id()), event.message_str or "")
