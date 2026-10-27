@@ -1305,14 +1305,58 @@ class Memory5(Star):
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
 
     # ---------------------------------------------------------- extraction
+    def _filter_low_density(self, rows: list[dict]) -> tuple[list[dict], int]:
+        """归档前丢掉过短且几乎无关联的闲聊，减少压缩 Token。"""
+        if not bool(self._get("filter_low_density", True)):
+            return rows, 0
+        try:
+            min_chars = max(1, min(int(self._get("low_density_min_chars", 4)), 20))
+        except (TypeError, ValueError):
+            min_chars = 4
+        keep_words = ("提醒", "记得", "别忘", "地址", "电话", "医院", "药", "钱",
+                      "生日", "喜欢", "讨厌", "几点", "日期", "考试", "作业", "上班",
+                      "发烧", "难受", "不舒服")
+        fillers = {"嗯", "哦", "噢", "啊", "好", "好的", "行", "可以", "收到",
+                   "谢谢", "哈哈", "哈哈哈", "笑死", "在吗", "1", "6", "。"}
+        texts = [str(r.get("text", "")).replace("\n", " ").strip() for r in rows]
+        out, removed = [], 0
+        for idx, row in enumerate(rows):
+            text = texts[idx]
+            if not text:
+                removed += 1
+                continue
+            if any(word in text for word in keep_words):
+                out.append(row)
+                continue
+            if text.lower() in fillers or re.fullmatch(r"[\W\d_]+", text) or len(set(text)) == 1:
+                removed += 1
+                continue
+            if len(text) >= min_chars:
+                out.append(row)
+                continue
+            # 前后文里没有任何相同汉字，视为低关联
+            neighbors = ""
+            for j in (idx - 1, idx + 1):
+                if 0 <= j < len(texts):
+                    neighbors += texts[j]
+            chars = {c for c in text if "\u4e00" <= c <= "\u9fff"}
+            if chars and not any(c in neighbors for c in chars):
+                removed += 1
+                continue
+            out.append(row)
+        return out, removed
+
     async def _summarize(self, rows: list[dict]) -> list[dict]:
         provider = self.context.get_using_provider()
         if not provider or not hasattr(provider, "text_chat"):
             logger.warning("memory5: 没有可用的模型提供商（可能还在启动中），本批跳过")
             self._set_archive_status(False, "没有可用的模型提供商")
             return []
+        rows, removed = self._filter_low_density(rows[-150:])
+        if removed:
+            logger.info(f"memory5: 归档前过滤低密度消息 {removed} 条")
         lines = []
-        for row in rows[-150:]:
+        for row in rows:
             text = str(row.get("text", "")).replace("\n", " ").strip()
             if not text:
                 continue
