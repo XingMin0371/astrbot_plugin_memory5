@@ -2253,6 +2253,10 @@ class Memory5(Star):
         await self._send_private(sender, text)
 
     async def _admin_resend(self, qq: str = "") -> int:
+        async with _ADMIN_SYNC_LOCK:
+            return await self._admin_resend_inner(qq)
+
+    async def _admin_resend_inner(self, qq: str = "") -> int:
         desired = self._admin_configured()
         state = self._admin_state()
         authorized = {str(x) for x in state.get("authorized", [])}
