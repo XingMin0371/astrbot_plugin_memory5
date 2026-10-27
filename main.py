@@ -921,7 +921,7 @@ class Memory5(Star):
 
     @property
     def scopes(self) -> list[str]:
-        raw = self._get("write_scopes", ["group:REDACTED_GROUP", "private:REDACTED_USER"])
+        raw = self._get("write_scopes", [])
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         return [str(x) for x in raw]
@@ -1099,7 +1099,7 @@ class Memory5(Star):
                     continue
                 for row in read_jsonl(os.path.join(base, name)):
                     if row.get("tag") in ("低密度", "无效") and row.get("text"):
-                        low_text.add(str(row["text"]).strip())
+                        low_text.add(self._normalize_compare(self._normalize_time(str(row["text"]))))
         if not low_text:
             return 0
         contexts = getattr(req, "contexts", None)
@@ -1109,6 +1109,8 @@ class Memory5(Star):
         removed = 0
         for item in contexts:
             text = self._context_text(item) if isinstance(item, dict) else ""
+            if text:
+                text = self._normalize_compare(self._normalize_time(text))
             if text and text in low_text:
                 removed += 1
                 continue
@@ -1356,13 +1358,83 @@ class Memory5(Star):
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
 
     # ---------------------------------------------------------- extraction
+    _STOP_CHARS = set("我你他她它的了是在有和就都一个上也很到说要去会着没有好这那不们吗呢吧啊哦嗯哈呀嘛")
+    _TIME_MAP = {
+        "今儿个": "今天", "今儿": "今天", "明儿个": "明天", "明儿": "明天",
+        "赶明儿": "明天", "后儿个": "后天", "后儿": "后天", "昨儿个": "昨天",
+        "昨儿": "昨天", "夜儿个": "昨天", "夜个": "昨天", "前儿个": "前天",
+        "前儿": "前天", "这会儿": "现在", "那会儿": "那时", "多会儿": "什么时候",
+        "啥时候": "什么时候", "晌午": "中午", "后晌": "下午", "下晚儿": "晚上",
+        "头年": "去年", "年根": "年底", "today": "今天", "tomorrow": "明天",
+        "yesterday": "昨天", "tonight": "今晚", "weekend": "周末",
+    }
+    _TIME_RE = re.compile(
+        r"今[天儿]|明[天儿早晚上]|后[天儿]|昨[天儿]|前[天儿]|大后[天儿]|大前[天儿]|"
+        r"今晚|今早|明晚|明早|昨晚|昨晚|周末|周[一二三四五六日天]|下周|上周|这周|本周|"
+        r"月底|月初|下个月|上个月|春节|过年|元旦|中秋|国庆|假期|开学|放假|"
+        r"早上|上午|中午|下午|傍晚|晚上|半夜|凌晨|现在|等会|一会儿|改天|下次|上次|最近|"
+        r"today|tomorrow|yesterday|tonight|weekend|next week|next month", re.I)
+    _STOP_WORDS = {"the", "a", "an", "is", "am", "are", "to", "of", "and", "or", "in", "on", "at", "it", "this", "that"}
+
+    @classmethod
+    def _normalize_time(cls, text: str) -> str:
+        out = str(text or "")
+        for src, dst in cls._TIME_MAP.items():
+            out = out.replace(src, dst)
+        return out
+
     @staticmethod
-    def _density_units(text: str) -> tuple[int, set[str]]:
-        """中文按字、英文按词、数字按段计数。"""
+    def _normalize_compare(text: str) -> str:
+        out = re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF]", "", str(text or ""))
+        out = re.sub(r"\s+", "", out)
+        out = re.sub(r"[\W_]+", "", out, flags=re.UNICODE)
+        return out.lower()
+
+    @classmethod
+    def _identity_text(cls, row: dict) -> str:
+        text = str(row.get("text", "")).replace("\n", " ").strip()
+        qq = str(row.get("qq") or "").strip()
+        name = str(row.get("name") or "").strip()
+        subject = qq if re.fullmatch(r"[A-Za-z0-9_-]{5,64}", qq) else name
+        if not subject:
+            return text
+        def _mention(match):
+            label, ident = match.group(1), match.group(2)
+            value = ident or (label if label.isdigit() else "")
+            return "@" + value if value else match.group(0)
+        text = re.sub(r"@([^\s()]+)(?:\((\d{5,12})\))?", _mention, text)
+        text = re.sub(r"我|俺|本人", subject, text, count=2)
+        return text
+
+    @classmethod
+    def _relevance_tokens(cls, text: str) -> set[str]:
+        t = cls._normalize_time(text).lower()
+        cjk = [c for c in t if "\u4e00" <= c <= "\u9fff" and c not in cls._STOP_CHARS]
+        grams = {cjk[i] + cjk[i + 1] for i in range(len(cjk) - 1)}
+        if not grams:
+            grams = set(cjk)
+        words = {w for w in re.findall(r"[a-z]{2,}", t) if w not in cls._STOP_WORDS}
+        digits = set(re.findall(r"\d{2,}", t))
+        return grams | words | digits
+
+    @classmethod
+    def _density_units(cls, text: str) -> tuple[int, set[str]]:
         cjk = re.findall(r"[\u4e00-\u9fff]", text)
         words = re.findall(r"[A-Za-z]+", text.lower())
         digits = re.findall(r"\d+", text)
         return len(cjk) + len(words) + len(digits), set(cjk + words + digits)
+
+    @staticmethod
+    def _exempt(text: str) -> bool:
+        if re.search(r"https?://|www\.|```", text, re.I):
+            return True
+        if re.search(r"\d{6,}", text):
+            return True
+        if re.search(r"(单号|订单|快递|票号|编号|手机号|电话)[:：]?\s*\w+", text):
+            return True
+        if re.search(r"[{}<>;=]{2,}|\b(def|class|select|insert|update)\b", text, re.I):
+            return True
+        return False
 
     def _filter_low_density(self, rows: list[dict]) -> tuple[list[dict], int]:
         """归档前丢掉低密度、重复或与前后文几乎无关联的内容。"""
@@ -1380,6 +1452,8 @@ class Memory5(Star):
                       "开会", "项目", "约", "时间", "明天", "后天", "昨天", "今天",
                       "裁员", "公司", "辞职", "面试", "工资", "合同", "生病", "住院",
                       "搬家", "结婚", "分手", "成绩",
+                      "丢", "坏", "病", "痛", "请假", "迟到", "加班", "退", "换",
+                      "欠", "还", "猫", "狗", "手机", "电脑", "钥匙", "证件", "钱包",
                       "remind", "remember", "address", "phone", "hospital", "medicine",
                       "money", "birthday", "exam", "date", "meeting", "work")
         fillers = {"嗯", "哦", "噢", "啊", "好", "好的", "行", "可以", "收到",
@@ -1387,9 +1461,11 @@ class Memory5(Star):
                    "ok", "okay", "k", "lol", "haha", "yes", "no", "thanks", "thx",
                    "hi", "hello", "good"}
         texts = [str(r.get("text", "")).replace("\n", " ").strip() for r in rows]
-        tokens = [self._density_units(t) for t in texts]
+        identity = [self._identity_text(r) for r in rows]
+        tokens = [self._density_units(self._normalize_time(t)) for t in identity]
+        rel_tokens = [self._relevance_tokens(t) for t in identity]
         all_tokens = set()
-        for _units, chars in tokens:
+        for chars in rel_tokens:
             all_tokens |= chars
         seen = set()
         out, removed = [], 0
@@ -1400,22 +1476,28 @@ class Memory5(Star):
                 self._filter_stats["density"] += 1
                 continue
             lowered = text.lower()
-            compact = re.sub(r"\s+", "", text)
-            # 系统提示、重复刷屏
-            if re.search(r"【[^】]*归档[^】]*】|^\[Poke\]$|^【.*】$|^[↑↓]?表情包分享$|^\[(图片|表情)\]$", text):
+            compact = self._normalize_compare(self._normalize_time(self._identity_text(row)))
+            # 系统提示收窄到明确的归档/拍一拍/表情包分享
+            if re.search(r"^【今日回忆已完成归档】$|^【[^】]*归档[^】]*】$|^\[Poke\]$|^\[(图片|表情)\]$|^[↑↓]?表情包分享$", text):
                 removed += 1
                 self._filter_stats["density"] += 1
                 continue
-            if compact in seen:
+            dedup_key = (str(row.get("qq") or row.get("name") or ""), str(row.get("ts") or ""), compact)
+            if dedup_key in seen:
                 removed += 1
                 self._filter_stats["density"] += 1
                 continue
-            seen.add(compact)
+            seen.add(dedup_key)
+            if self._TIME_RE.search(self._normalize_time(text)):
+                out.append(row)
+                continue
             if any(word in lowered for word in keep_words):
                 out.append(row)
                 continue
-            # 人物、提问、时间、约定：保留，避免丢对象/事件
-            if re.search(r"[@?？]|\d{1,2}[:：]\d{2}|\d{1,2}[月/.-]\d{1,2}|周[一二三四五六日天]", text):
+            if re.search(r"[@?？]|\d{1,2}[:：]\d{2}|\d{1,2}[月/.-]\d{1,2}", text):
+                out.append(row)
+                continue
+            if self._exempt(text):
                 out.append(row)
                 continue
             if lowered in fillers or re.fullmatch(r"[\W\d_]+", text) or len(set(text)) == 1:
@@ -1424,19 +1506,21 @@ class Memory5(Star):
                 continue
             units, chars = tokens[idx]
             ratio = len(chars) / max(1, units)
-            others = all_tokens - chars
-            related = bool(chars & others)
-            # 长消息也可能低密度：复读、词汇重复、有效字符占比低
-            if ratio <= 0.5:
+            other_tokens = all_tokens - rel_tokens[idx]
+            related = bool(rel_tokens[idx] & other_tokens)
+            if ratio < 0.3:
                 removed += 1
                 self._filter_stats["density"] += 1
                 continue
-            if units < min_units:
-                if not related:
-                    removed += 1
-                    self._filter_stats["relevance"] += 1
-                    continue
-                out.append(row)
+            half = len(text) // 2
+            repeated = half >= 2 and text[:half] == text[half:]
+            if units <= 8 and ratio <= 0.5 and repeated:
+                removed += 1
+                self._filter_stats["density"] += 1
+                continue
+            if units < min_units and not related:
+                removed += 1
+                self._filter_stats["relevance"] += 1
                 continue
             out.append(row)
         return out, removed
@@ -1657,7 +1741,7 @@ class Memory5(Star):
         if not self._can_notify_today():
             logger.info("memory5: 今日归档通知已达上限，跳过")
             return
-        raw = self._get("notify_scopes", ["private:REDACTED_USER", "group:REDACTED_GROUP"])
+        raw = self._get("notify_scopes", [])
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         sent = 0
@@ -2735,7 +2819,7 @@ class Memory5(Star):
         return configured & authorized
 
     def bot_qqs(self) -> set[str]:
-        raw = self._get("bot_qqs", ["REDACTED_BOT"])
+        raw = self._get("bot_qqs", [])
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         return {str(x).strip() for x in raw if str(x).strip()}
