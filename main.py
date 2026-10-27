@@ -52,6 +52,7 @@ class _SafeLogger:
 
 
 logger = _SafeLogger()
+_ADMIN_SYNC_LOCK = asyncio.Lock()
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Image, Plain, Record, Video
 from astrbot.api.provider import ProviderRequest
@@ -851,6 +852,7 @@ class Memory5(Star):
         self._suppress: dict[str, float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
+        self._bg_tasks: list[asyncio.Task] = []
 
     # ------------------------------------------------------------- config
     @staticmethod
@@ -2179,6 +2181,10 @@ class Memory5(Star):
         logger.info("memory5: 管理员配置为空，已撤销原授权")
 
     async def _admin_sync(self) -> None:
+        async with _ADMIN_SYNC_LOCK:
+            await self._admin_sync_inner()
+
+    async def _admin_sync_inner(self) -> None:
         desired = self._admin_configured()
         state = self._admin_state()
         mode = self._admin_mode()
@@ -2416,10 +2422,12 @@ class Memory5(Star):
                 logger.warning(f"memory5: WebUI 注册失败 {type(exc).__name__}: {exc}")
         if self._consume_archive_flag():
             logger.info("memory5: 检测到手动归档开关，稍后执行一次")
-            asyncio.create_task(self._delayed_archive())
-        asyncio.create_task(self._prewarm_cache())
-        asyncio.create_task(self._heartbeat_loop())
-        asyncio.create_task(self._admin_loop())
+            self._bg_tasks.extend([
+            asyncio.create_task(self._delayed_archive()),
+            asyncio.create_task(self._prewarm_cache()),
+            asyncio.create_task(self._heartbeat_loop()),
+            asyncio.create_task(self._admin_loop()),
+        ])
         if self._extract_task is None or self._extract_task.done():
             self._extract_task = asyncio.create_task(self._extract_loop())
         if self._task is None or self._task.done():
