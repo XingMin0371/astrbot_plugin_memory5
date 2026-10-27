@@ -921,7 +921,7 @@ class Memory5(Star):
 
     @property
     def scopes(self) -> list[str]:
-        raw = self._get("write_scopes", [])
+        raw = self._get("write_scopes", ["group:REDACTED_GROUP", "private:REDACTED_USER"])
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         return [str(x) for x in raw]
@@ -1517,7 +1517,7 @@ class Memory5(Star):
         if not self._can_notify_today():
             logger.info("memory5: 今日归档通知已达上限，跳过")
             return
-        raw = self._get("notify_scopes", [])
+        raw = self._get("notify_scopes", ["private:REDACTED_USER", "group:REDACTED_GROUP"])
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         sent = 0
@@ -2118,7 +2118,17 @@ class Memory5(Star):
                 return True
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f"memory5: 候选 {umo} 发送失败 {type(exc).__name__}")
-        logger.warning(f"memory5: 给 {qq} 发送授权消息失败，所有候选会话都不可用")
+                try:
+                    from astrbot.core.platform.message_session import MessageSession
+                    session = MessageSession.from_str(umo)
+                    inst = self.context.get_platform_inst(session.platform_id)
+                    if inst:
+                        await asyncio.wait_for(inst.send_by_session(session, MessageChain().message(text)), timeout=15)
+                        record_umo(f"private:{qq}", umo)
+                        return True
+                except Exception as exc2:  # noqa: BLE001
+                    logger.debug(f"memory5: 平台实例直发也失败 {type(exc2).__name__}")
+        logger.warning(f"memory5: 给 {qq} 发送授权消息失败，候选={candidates}；平台={self._platform_names()}")
         return False
 
 
@@ -2140,9 +2150,10 @@ class Memory5(Star):
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         out = set()
+        pattern = r"\d{5,12}" if self._admin_mode() == "qq" else r"[A-Za-z0-9_-]{1,64}"
         for item in raw or []:
             value = str(item).strip()
-            if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
+            if re.fullmatch(pattern, value):
                 out.add(value)
         return out
 
@@ -2554,13 +2565,12 @@ class Memory5(Star):
 
     # ------------------------------------------------------------ command
     def admin_qqs(self) -> set[str]:
-        raw = self._get("admin_qqs", [])
-        if isinstance(raw, str):
-            raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
-        return {str(x).strip() for x in raw if str(x).strip()}
+        configured = self._admin_configured()
+        authorized = {str(x) for x in self._admin_state().get("authorized", [])}
+        return configured & authorized
 
     def bot_qqs(self) -> set[str]:
-        raw = self._get("bot_qqs", [])
+        raw = self._get("bot_qqs", ["REDACTED_BOT"])
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         return {str(x).strip() for x in raw if str(x).strip()}
@@ -2578,6 +2588,14 @@ class Memory5(Star):
         if text:
             self._suppress[text] = now_ts
         return text
+
+    async def terminate(self) -> None:
+        tasks = [self._task, self._extract_task, getattr(self, "_empty_task", None)]
+        tasks.extend(getattr(self, "_bg_tasks", []))
+        for task in tasks:
+            if task is not None:
+                task.cancel()
+        await asyncio.gather(*(t for t in tasks if t is not None), return_exceptions=True)
 
     @filter.command("记忆查看")
     async def cmd_view(self, event: AstrMessageEvent) -> None:
