@@ -2145,8 +2145,33 @@ class Memory5(Star):
     def _admin_mode(self) -> str:
         return "account" if str(self._get("admin_id_type", "QQ号")) == "其他平台账号" else "qq"
 
+    def _admin_configured_from_file(self):
+        path = os.path.join(DATA_DIR, "config", "memory5_config.json")
+        if not os.path.isfile(path):
+            return None
+        try:
+            cfg = json.load(open(path, encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            return None
+        mode = self._admin_mode()
+        if mode == "qq":
+            raw = cfg.get("admin_qqs")
+            if raw is None:
+                raw = (cfg.get("permission") or {}).get("admin_qqs")
+        else:
+            raw = cfg.get("admin_accounts")
+            if raw is None:
+                raw = (cfg.get("permission") or {}).get("admin_accounts")
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
+        return list(raw or [])
+
     def _admin_configured(self) -> set[str]:
-        raw = self._get("admin_qqs", []) if self._admin_mode() == "qq" else self._get("admin_accounts", [])
+        raw = self._admin_configured_from_file()
+        if raw is None:
+            raw = self._get("admin_qqs", []) if self._admin_mode() == "qq" else self._get("admin_accounts", [])
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         out = set()
@@ -2437,7 +2462,7 @@ class Memory5(Star):
                 logger.warning(f"memory5: WebUI 注册失败 {type(exc).__name__}: {exc}")
         if self._consume_archive_flag():
             logger.info("memory5: 检测到手动归档开关，稍后执行一次")
-            self._bg_tasks.extend([
+        self._bg_tasks.extend([
             asyncio.create_task(self._delayed_archive()),
             asyncio.create_task(self._prewarm_cache()),
             asyncio.create_task(self._heartbeat_loop()),
