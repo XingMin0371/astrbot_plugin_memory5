@@ -13,7 +13,6 @@ import asyncio
 import base64
 import difflib
 import json
-import logging
 import os
 import random
 import secrets
@@ -27,23 +26,31 @@ from zoneinfo import ZoneInfo
 from astrbot.api import logger
 
 
-class _RelPathFilter(logging.Filter):
-    def filter(self, record):
-        if os.environ.get("MEMORY5_LOG_ABSOLUTE") == "1":
-            return True
-        try:
-            msg = record.getMessage()
-            for key, label in ((MEM_ROOT, "memory5"), (PLUGIN_DATA_DIR, "plugin_data"), (DATA_DIR, "data")):
-                if key:
-                    msg = msg.replace(key + os.sep, label + "/").replace(key, label)
-            record.msg = msg
-            record.args = ()
-        except Exception:  # noqa: BLE001
-            pass
-        return True
+_orig_logger = logger
 
 
-logger.addFilter(_RelPathFilter())
+class _SafeLogger:
+    def __getattr__(self, name):
+        attr = getattr(_orig_logger, name)
+        if name not in ("debug", "info", "warning", "error", "exception", "critical"):
+            return attr
+
+        def wrapped(msg, *args, **kwargs):
+            if os.environ.get("MEMORY5_LOG_ABSOLUTE") != "1":
+                try:
+                    text = str(msg)
+                    for key, label in ((MEM_ROOT, "memory5"), (PLUGIN_DATA_DIR, "plugin_data"), (DATA_DIR, "data")):
+                        if key:
+                            text = text.replace(key + os.sep, label + "/").replace(key, label)
+                    msg = text
+                except Exception:  # noqa: BLE001
+                    pass
+            return attr(msg, *args, **kwargs)
+
+        return wrapped
+
+
+logger = _SafeLogger()
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Image, Plain, Record, Video
 from astrbot.api.provider import ProviderRequest
@@ -2183,7 +2190,7 @@ class Memory5(Star):
         for qq in list(pending):
             entry = pending[qq]
             ts = entry.get("ts", 0) if isinstance(entry, dict) else entry
-            if now_ts - float(ts or 0) > 24 * 3600:
+            if now_ts - float(ts or 0) > 600:
                 pending.pop(qq, None)
 
         for qq in desired - set(authorized):
@@ -2193,7 +2200,7 @@ class Memory5(Star):
             code = f"{secrets.randbelow(1000000):06d}"
             sent = await self._send_private(
                 qq,
-                f"管理员授权验证：验证码 {code}，请回复「{code} 已确认授权」；24 小时内有效。",
+                f"管理员授权验证：验证码 {code}，请回复「{code} 已确认授权」；10 分钟内有效。",
             )
             if sent:
                 pending[qq] = {"code": code, "ts": now_ts}
@@ -2233,16 +2240,22 @@ class Memory5(Star):
         pending = dict(state.get("pending", {}))
         sent_count = 0
         targets = [qq] if qq else sorted(desired - authorized)
+        now = time.time()
+        last = getattr(self, "_resend_last", {})
         for target in targets:
             if not target:
+                continue
+            if now - float(last.get(target, 0) or 0) < 45:
                 continue
             code = f"{secrets.randbelow(1000000):06d}"
             ok = await self._send_private(
                 target,
-                f"管理员授权验证：验证码 {code}，请回复「{code} 已确认授权」；24 小时内有效。",
+                f"管理员授权验证：验证码 {code}，请回复「{code} 已确认授权」；10 分钟内有效。",
             )
             if ok:
                 pending[target] = {"code": code, "ts": time.time()}
+                last[target] = time.time()
+                self._resend_last = last
                 sent_count += 1
         if sent_count:
             state["pending"] = pending
