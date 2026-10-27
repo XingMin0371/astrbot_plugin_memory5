@@ -935,7 +935,7 @@ class Memory5(Star):
 
     @property
     def budget(self) -> int:
-        return self._int("inject_budget_chars", 1800, 300)
+        return self._int("inject_budget_chars", 3600, 300)
 
     @property
     def normal_budget(self) -> int:
