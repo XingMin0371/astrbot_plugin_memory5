@@ -71,7 +71,7 @@
       },
       "timezone": {
         "description": "时区",
-        "hint": "一个国家只保留一个代表时区；中国用北京时间 UTC+8",
+        "hint": "一个国家只保留一个代表时区；中国用北京时间 UTC+8。修改后需重启/重载插件",
         "type": "string",
         "options": [
           "北京时间（Asia/Shanghai）",
