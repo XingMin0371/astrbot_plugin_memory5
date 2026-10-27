@@ -130,6 +130,12 @@
         "hint": "中文按字、英文按词、数字按段计数；少于该值且与前后文无关联的消息会被过滤，默认 4",
         "type": "int",
         "default": 4
+      },
+      "filter_low_density_night_only": {
+        "description": "仅在凌晨归档过滤",
+        "hint": "默认开启：只在 00:00-06:00 的归档前过滤；关闭后每次归档都会过滤",
+        "type": "bool",
+        "default": true
       }
     }
   },
