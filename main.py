@@ -2237,6 +2237,15 @@ class Memory5(Star):
         for qq in authorized:
             self._ensure_owner_memory(qq)
 
+    async def _auth_notice(self, sender: str, text: str) -> None:
+        now = time.time()
+        last = getattr(self, "_auth_reply_last", {})
+        if now - float(last.get(sender, 0) or 0) < 30:
+            return
+        last[sender] = now
+        self._auth_reply_last = last
+        await self._send_private(sender, text)
+
     async def _admin_resend(self, qq: str = "") -> int:
         desired = self._admin_configured()
         state = self._admin_state()
@@ -2287,19 +2296,36 @@ class Memory5(Star):
         entry = pending.get(sender)
         if not match or not isinstance(entry, dict) or str(entry.get("code")) != match.group(1):
             if isinstance(entry, dict) and entry.get("code"):
-                await self._send_private(
+                fails = getattr(self, "_auth_fail", {})
+                count, ts = fails.get(sender, (0, 0))
+                if time.time() - float(ts or 0) > 600:
+                    count = 0
+                count += 1
+                fails[sender] = (count, time.time())
+                self._auth_fail = fails
+                if count >= 5:
+                    pending.pop(sender, None)
+                    state["pending"] = pending
+                    self._save_admin_state(state)
+                    await self._auth_notice(sender, "验证码错误次数过多，已作废；请在面板点「重发授权」获取新验证码。")
+                    return
+                await self._auth_notice(
                     sender,
                     f"授权未完成：请回复「{entry['code']} 已确认授权」，验证码 10 分钟内有效。",
                 )
             elif sender in {str(x) for x in state.get("authorized", [])}:
-                await self._send_private(sender, "这个账号已经授权过了，不需要重复确认。")
+                await self._auth_notice(sender, "这个账号已经授权过了，不需要重复确认。")
             else:
-                await self._send_private(sender, "当前没有待确认的授权，请在面板点「重发授权」获取验证码。")
+                await self._auth_notice(sender, "当前没有待确认的授权，请在面板点「重发授权」获取验证码。")
             return
         code = match.group(1)
         event.stop_event()
         try:
             event.should_call_llm(False)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            getattr(self, "_auth_fail", {}).pop(sender, None)
         except Exception:  # noqa: BLE001
             pass
         authorized = set(str(x) for x in state.get("authorized", []))
