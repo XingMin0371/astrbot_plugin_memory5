@@ -1336,7 +1336,6 @@ class Memory5(Star):
             parts_out.append(recent_chunk)
         return "\n\n".join(parts_out)
 
-    @filter.on_llm_request()
     def _clean_pending_context(self, req) -> int:
         pending = getattr(self, "_pending_context_clean", None)
         if not pending:
@@ -1357,6 +1356,7 @@ class Memory5(Star):
             logger.info(f"memory5: 归档过滤项同步清理上下文 {removed} 条")
         return removed
 
+    @filter.on_llm_request()
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         try:
             scope = self.scope_of(event)
