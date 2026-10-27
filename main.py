@@ -1305,41 +1305,54 @@ class Memory5(Star):
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
 
     # ---------------------------------------------------------- extraction
+    @staticmethod
+    def _density_units(text: str) -> tuple[int, set[str]]:
+        """中文按字、英文按词、数字按段计数。"""
+        cjk = re.findall(r"[\u4e00-\u9fff]", text)
+        words = re.findall(r"[A-Za-z]+", text.lower())
+        digits = re.findall(r"\d+", text)
+        return len(cjk) + len(words) + len(digits), set(cjk + words + digits)
+
     def _filter_low_density(self, rows: list[dict]) -> tuple[list[dict], int]:
         """归档前丢掉过短且几乎无关联的闲聊，减少压缩 Token。"""
         if not bool(self._get("filter_low_density", True)):
             return rows, 0
         try:
-            min_chars = max(1, min(int(self._get("low_density_min_chars", 4)), 20))
+            min_units = max(1, min(int(self._get("low_density_min_chars", 4)), 20))
         except (TypeError, ValueError):
-            min_chars = 4
+            min_units = 4
         keep_words = ("提醒", "记得", "别忘", "地址", "电话", "医院", "药", "钱",
                       "生日", "喜欢", "讨厌", "几点", "日期", "考试", "作业", "上班",
-                      "发烧", "难受", "不舒服")
+                      "发烧", "难受", "不舒服",
+                      "remind", "remember", "address", "phone", "hospital", "medicine",
+                      "money", "birthday", "exam", "date", "meeting", "work")
         fillers = {"嗯", "哦", "噢", "啊", "好", "好的", "行", "可以", "收到",
-                   "谢谢", "哈哈", "哈哈哈", "笑死", "在吗", "1", "6", "。"}
+                   "谢谢", "哈哈", "哈哈哈", "笑死", "在吗", "1", "6", "。",
+                   "ok", "okay", "k", "lol", "haha", "yes", "no", "thanks", "thx",
+                   "hi", "hello", "good"}
         texts = [str(r.get("text", "")).replace("\n", " ").strip() for r in rows]
+        tokens = [self._density_units(t) for t in texts]
         out, removed = [], 0
         for idx, row in enumerate(rows):
             text = texts[idx]
             if not text:
                 removed += 1
                 continue
-            if any(word in text for word in keep_words):
+            lowered = text.lower()
+            if any(word in lowered for word in keep_words):
                 out.append(row)
                 continue
-            if text.lower() in fillers or re.fullmatch(r"[\W\d_]+", text) or len(set(text)) == 1:
+            if lowered in fillers or re.fullmatch(r"[\W\d_]+", text) or len(set(text)) == 1:
                 removed += 1
                 continue
-            if len(text) >= min_chars:
+            units, chars = tokens[idx]
+            if units >= min_units:
                 out.append(row)
                 continue
-            # 前后文里没有任何相同汉字，视为低关联
             neighbors = ""
             for j in (idx - 1, idx + 1):
                 if 0 <= j < len(texts):
-                    neighbors += texts[j]
-            chars = {c for c in text if "\u4e00" <= c <= "\u9fff"}
+                    neighbors += texts[j].lower()
             if chars and not any(c in neighbors for c in chars):
                 removed += 1
                 continue
