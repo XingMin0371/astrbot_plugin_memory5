@@ -69,6 +69,12 @@
         "type": "bool",
         "default": false
       },
+      "archive_on_start": {
+        "description": "插件重启自动归档",
+        "hint": "默认关闭：只在勾选「立即归档一次」时归档；开启后每次插件启动约 30 秒自动归档一次。",
+        "type": "bool",
+        "default": false
+      },
       "timezone": {
         "description": "时区",
         "hint": "一个国家只保留一个代表时区；中国用北京时间 UTC+8。修改后需重启/重载插件",
