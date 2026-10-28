@@ -577,6 +577,33 @@ class _TasksMixin:
         groups.sort(key=lambda g: g["qq"])
         return jsonify({"status": "ok", "data": groups})
 
+    async def aliases_add(self):
+        body = await request.get_json() or {}
+        scope = str(body.get("scope", "")).strip()
+        qq = str(body.get("qq", "")).strip()
+        alias = str(body.get("new", "")).strip()[:12]
+        try:
+            confidence = round(max(0.0, min(1.0, float(body.get("confidence", 1.0)))), 2)
+        except (TypeError, ValueError):
+            confidence = 1.0
+        if not scope or not qq or not alias:
+            raise ValueError("缺少 scope / qq / 别名")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", qq):
+            raise ValueError("账号格式不合法")
+        path = os.path.join(scope_dir(scope), "aliases.json")
+        data = read_json(path, {}) or {}
+        bucket = data.get(qq, [])
+        if any(item.get("alias") == alias for item in bucket):
+            return jsonify({"status": "ok"})
+        bucket.append({
+            "alias": alias, "source": "manual", "confidence": confidence,
+            "first_seen": time.strftime("%Y-%m-%d"), "last_seen": time.strftime("%Y-%m-%d"),
+        })
+        data[qq] = bucket
+        write_json(path, data)
+        self._invalidate_dates(scope)
+        return jsonify({"status": "ok"})
+
     async def aliases_update(self):
         body = await request.get_json() or {}
         scope = str(body.get("scope", "")).strip()
@@ -948,6 +975,7 @@ class Memory5WebUI(_TasksMixin):
             ("/memory5/aliases", self.aliases, ["GET"], "别名列表"),
             ("/memory5/aliases-merge", self.aliases_merge, ["POST"], "合并别名"),
             ("/memory5/aliases-update", self.aliases_update, ["POST"], "修改别名"),
+            ("/memory5/aliases-add", self.aliases_add, ["POST"], "新增别名"),
             ("/memory5/aliases-delete", self.aliases_delete, ["POST"], "删除别名"),
             ("/memory5/health", self.health, ["GET"], "健康状态"),
             ("/memory5/selfcheck", self.selfcheck, ["POST"], "自检"),
@@ -969,7 +997,9 @@ class Memory5WebUI(_TasksMixin):
             ("/memory5/task-toggle", self.task_toggle, ["POST"], "启用/停用定时任务"),
             ("/memory5/task-media", self.task_media, ["POST"], "上传任务富媒体"),
         ):
+            base = path.replace("/memory5", "", 1)
             ctx.register_web_api(path, self._wrap(handler), methods, desc)
+            ctx.register_web_api(f"/astrbot_plugin_memory5{base}", self._wrap(handler), methods, desc)
 
     @staticmethod
     def _wrap(handler):
