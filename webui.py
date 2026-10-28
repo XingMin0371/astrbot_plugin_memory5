@@ -581,7 +581,7 @@ class _TasksMixin:
         body = await request.get_json() or {}
         scope = str(body.get("scope", "")).strip()
         qq = str(body.get("qq", "")).strip()
-        alias = str(body.get("new", "")).strip()[:12]
+        alias = str(body.get("new", "")).strip()
         try:
             confidence = round(max(0.0, min(1.0, float(body.get("confidence", 1.0)))), 2)
         except (TypeError, ValueError):
@@ -590,6 +590,8 @@ class _TasksMixin:
             raise ValueError("缺少 scope / qq / 别名")
         if not qq or len(qq) > 128 or re.search(r"[\s/\\]", qq):
             raise ValueError("账号格式不合法")
+        if len(alias) > 12:
+            raise ValueError("别名最多 12 个字符")
         path = os.path.join(scope_dir(scope), "aliases.json")
         data = read_json(path, {}) or {}
         bucket = data.get(qq, [])
@@ -609,20 +611,22 @@ class _TasksMixin:
         scope = str(body.get("scope", "")).strip()
         qq = str(body.get("qq", "")).strip()
         old = str(body.get("old", "")).strip()
-        new = str(body.get("new", "")).strip()[:32]
+        new = str(body.get("new", "")).strip()
         try:
             confidence = float(body.get("confidence"))
         except (TypeError, ValueError):
             confidence = None
         if not scope or not qq or not old:
             raise ValueError("缺少 scope / qq / old")
+        if new and len(new) > 12:
+            raise ValueError("别名最多 12 个字符")
         path = os.path.join(scope_dir(scope), "aliases.json")
         data = read_json(path, {}) or {}
         bucket = data.get(qq, [])
         for item in bucket:
             if item.get("alias") == old:
                 if new:
-                    item["alias"] = new[:12]
+                    item["alias"] = new
                 if confidence is not None:
                     item["confidence"] = round(max(0.0, min(1.0, confidence)), 2)
                 item["last_seen"] = time.strftime("%Y-%m-%d")
@@ -841,7 +845,7 @@ class _TasksMixin:
         return jsonify({"status": "ok", "data": {"removed": removed}})
 
     async def health(self):
-        from .main import VERSION, refresh_index
+        from .main import VERSION
 
         now_ts = time.time()
         hb = read_json(os.path.join(MEM_ROOT, "heartbeat.json"), {})
