@@ -1245,8 +1245,58 @@ async function renderAliases(scope) {
   box.innerHTML = "";
   $("trashBox").classList.add("hidden");
   const groups = unwrap(await apiGet("aliases", { scope })) || [];
+
+  const addCard = document.createElement("div");
+  addCard.className = "card";
+  const addTitle = document.createElement("div");
+  addTitle.className = "meta";
+  addTitle.textContent = "新增别名";
+  const addRow = document.createElement("div");
+  addRow.className = "actions";
+  const qqInput = document.createElement("input");
+  qqInput.type = "text";
+  qqInput.placeholder = "QQ号";
+  qqInput.style.maxWidth = "140px";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.placeholder = "别名，最多12字";
+  nameInput.maxLength = 12;
+  nameInput.style.maxWidth = "160px";
+  const confInput = document.createElement("input");
+  confInput.type = "number";
+  confInput.step = "0.1";
+  confInput.min = "0";
+  confInput.max = "1";
+  confInput.value = "1";
+  confInput.style.maxWidth = "80px";
+  const addBtn = document.createElement("button");
+  addBtn.textContent = "新增";
+  addBtn.onclick = async () => {
+    const qq = qqInput.value.trim();
+    const alias = nameInput.value.trim();
+    const confidence = Number(confInput.value || 1);
+    if (!qq || !alias) {
+      toast("请填写 QQ 和别名", 3000);
+      return;
+    }
+    const res = await apiPost("aliases-add", { scope, qq, new: alias, confidence });
+    toast(okOf(res) ? "已新增" : "新增失败");
+    if (okOf(res)) {
+      qqInput.value = "";
+      nameInput.value = "";
+      confInput.value = "1";
+      renderAliases(scope);
+    }
+  };
+  addRow.append(qqInput, nameInput, confInput, addBtn);
+  addCard.append(addTitle, addRow);
+  box.appendChild(addCard);
+
   if (!groups.length) {
-    box.innerHTML = '<div class="card empty">还没有别名记录。</div>';
+    const empty = document.createElement("div");
+    empty.className = "card empty";
+    empty.textContent = "还没有别名记录。";
+    box.appendChild(empty);
     $("pager").classList.add("hidden");
     return;
   }
