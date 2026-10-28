@@ -1824,14 +1824,15 @@ class Memory5(Star):
         write_json(os.path.join(MEM_ROOT, ".last_extract"), {"ts": time.time()})
         return total
 
-    async def trigger_archive(self) -> bool:
-        """手动触发（设置页开关）：不管有没有新条目，都尽量发一条归档通知。"""
+    async def trigger_archive(self, reason: str = "manual") -> bool:
+        """手动/启动触发归档。"""
         if self._archiving:
             return False
         self._archiving = True
         try:
             total = await self._run_extraction()
-            logger.info(f"memory5: 手动归档完成，新增 {total} 条")
+            label = "启动自动归档" if reason == "startup" else "手动归档"
+            logger.info(f"memory5: {label}完成，新增 {total} 条")
             await self._notify_archived(force=True)
         finally:
             self._archiving = False
@@ -1839,13 +1840,13 @@ class Memory5(Star):
 
     async def _delayed_archive(self) -> None:
         """等模型提供商就绪再跑，避免启动瞬间 provider 为空。"""
-        await asyncio.sleep(25)
+        await asyncio.sleep(30)
         for _ in range(6):
             provider = self.context.get_using_provider()
             if provider and hasattr(provider, "text_chat"):
                 break
             await asyncio.sleep(10)
-        await self.trigger_archive()
+        await self.trigger_archive(reason="startup")
 
     def _consume_archive_flag(self) -> bool:
         """设置页勾选「立即归档一次」后读一次并复位；优先改内存里的配置，面板勾选也会跟着取消。"""
@@ -2720,10 +2721,13 @@ class Memory5(Star):
                 logger.info("memory5: WebUI API 已注册")
             except Exception as exc:  # pragma: no cover
                 logger.warning(f"memory5: WebUI 注册失败 {type(exc).__name__}: {exc}")
-        if self._consume_archive_flag():
+        manual_archive = self._consume_archive_flag()
+        if manual_archive:
             logger.info("memory5: 检测到手动归档开关，稍后执行一次")
+        auto_start = bool(self._get("archive_on_start", False))
+        if manual_archive or auto_start:
+            self._bg_tasks.append(asyncio.create_task(self._delayed_archive()))
         self._bg_tasks.extend([
-            asyncio.create_task(self._delayed_archive()),
             asyncio.create_task(self._prewarm_cache()),
             asyncio.create_task(self._heartbeat_loop()),
             asyncio.create_task(self._admin_loop()),
