@@ -1244,7 +1244,8 @@ async function renderAliases(scope) {
   const box = $("list");
   box.innerHTML = "";
   $("trashBox").classList.add("hidden");
-  const groups = unwrap(await apiGet("aliases", { scope })) || [];
+  const activeScope = (scope || "").trim();
+  const groups = activeScope ? (unwrap(await apiGet("aliases", { scope: activeScope })) || []) : [];
 
   const addCard = document.createElement("div");
   addCard.className = "card";
@@ -1253,6 +1254,10 @@ async function renderAliases(scope) {
   addTitle.textContent = "新增别名";
   const addRow = document.createElement("div");
   addRow.className = "actions";
+  const scopeInput = document.createElement("input");
+  scopeInput.type = "text";
+  scopeInput.placeholder = "目标会话，如 group:123 或 private:456";
+  scopeInput.style.maxWidth = "250px";
   const qqInput = document.createElement("input");
   qqInput.type = "text";
   qqInput.placeholder = "QQ号或平台账号";
@@ -1272,22 +1277,24 @@ async function renderAliases(scope) {
   const addBtn = document.createElement("button");
   addBtn.textContent = "新增";
   addBtn.onclick = async () => {
+    const targetScope = activeScope || scopeInput.value.trim();
     const qq = qqInput.value.trim();
     const alias = nameInput.value.trim();
     const confidence = Number(confInput.value || 1);
-    if (!qq || !alias) {
-      toast("请填写 QQ 和别名", 3000);
+    if (!targetScope || !qq || !alias) {
+      toast("请填写目标会话、账号和别名", 3000);
       return;
     }
-    const res = await apiPost("aliases-add", { scope, qq, new: alias, confidence });
+    const res = await apiPost("aliases-add", { scope: targetScope, qq, new: alias, confidence });
     toast(okOf(res) ? "已新增" : "新增失败");
     if (okOf(res)) {
       qqInput.value = "";
       nameInput.value = "";
       confInput.value = "1";
-      renderAliases(scope);
+      renderAliases(targetScope);
     }
   };
+  if (!activeScope) addRow.append(scopeInput);
   addRow.append(qqInput, nameInput, confInput, addBtn);
   addCard.append(addTitle, addRow);
   box.appendChild(addCard);
@@ -1295,7 +1302,7 @@ async function renderAliases(scope) {
   if (!groups.length) {
     const empty = document.createElement("div");
     empty.className = "card empty";
-    empty.textContent = "还没有别名记录。";
+    empty.textContent = activeScope ? "还没有别名记录。" : "填写目标会话后即可新增别名。";
     box.appendChild(empty);
     $("pager").classList.add("hidden");
     return;
@@ -1305,7 +1312,7 @@ async function renderAliases(scope) {
   search.className = "card";
   const searchInput = document.createElement("input");
   searchInput.type = "search";
-  searchInput.placeholder = "按 QQ、昵称或别名搜索";
+  searchInput.placeholder = "按账号、昵称或别名搜索";
   const searchInfo = document.createElement("span");
   searchInfo.className = "muted";
   searchInfo.style.marginLeft = "8px";

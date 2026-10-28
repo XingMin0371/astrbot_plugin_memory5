@@ -40,7 +40,11 @@ class _SafeLogger:
             if os.environ.get("MEMORY5_LOG_ABSOLUTE") != "1":
                 try:
                     text = str(msg)
-                    for key, label in ((MEM_ROOT, "memory5"), (PLUGIN_DATA_DIR, "plugin_data"), (DATA_DIR, "data")):
+                    for key, label in (
+                        (globals().get("MEM_ROOT"), "memory5"),
+                        (globals().get("PLUGIN_DATA_DIR"), "plugin_data"),
+                        (globals().get("DATA_DIR"), "data"),
+                    ):
                         if key:
                             text = text.replace(key + os.sep, label + "/").replace(key, label)
                     msg = text
@@ -175,11 +179,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-def encrypt_existing_storage() -> int:
-    """把已有记忆迁移到当前加密档位。"""
-    return encrypt_tree(MEM_ROOT)
-
-VERSION = "2.2.5"
+VERSION = "2.2.6"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -447,7 +447,6 @@ def append_entries(scope: str, entries: list[dict]) -> None:
     """按 (subject, topic, tag) 去重：新的覆盖旧的。"""
     if not entries:
         return
-    paths = scope_paths(scope)
     by_day: dict[str, list[dict]] = {}
     for entry in entries:
         by_day.setdefault(entry["date"], []).append(entry)
@@ -675,12 +674,24 @@ def raw_since(scope: str, cursor: dict, limit: int = 200) -> list[dict]:
 
 
 def _parse_model_items(raw: str) -> list[dict]:
-    """尽量从不同模型的输出里抠出条目数组：纯 JSON、代码块、包在对象里都试。"""
+    """尽量从不同模型的输出里抠出条目：纯 JSON、代码块、对象包裹、多个数组。"""
     text = str(raw or "").strip()
     if not text:
         return []
     text = re.sub(r"^```[a-zA-Z]*\s*", "", text)
     text = re.sub(r"\s*```$", "", text).strip()
+
+    def collect(data) -> list[dict]:
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        if isinstance(data, dict):
+            for key in ("items", "entries", "memories", "data", "list"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return [x for x in value if isinstance(x, dict)]
+            return [data]
+        return []
+
     candidates = [text]
     match = re.search(r"\[.*\]", text, re.S)
     if match:
@@ -690,15 +701,27 @@ def _parse_model_items(raw: str) -> list[dict]:
             data = json.loads(chunk)
         except ValueError:
             continue
-        if isinstance(data, list):
-            return [x for x in data if isinstance(x, dict)]
-        if isinstance(data, dict):
-            for key in ("items", "entries", "memories", "data", "list"):
-                value = data.get(key)
-                if isinstance(value, list):
-                    return [x for x in value if isinstance(x, dict)]
-            return [data]
-    return []
+        items = collect(data)
+        if items:
+            return items
+
+    # 模型偶尔会输出多个独立数组，逐个解析，别整个丢掉
+    decoder = json.JSONDecoder()
+    found: list[dict] = []
+    pos = 0
+    while pos < len(text):
+        starts = [i for i in (text.find("[", pos), text.find("{", pos)) if i != -1]
+        if not starts:
+            break
+        idx = min(starts)
+        try:
+            data, end = decoder.raw_decode(text[idx:])
+        except ValueError:
+            pos = idx + 1
+            continue
+        found.extend(collect(data))
+        pos = idx + end
+    return found
 
 _DB_INDEX_WARNED = False
 
@@ -840,7 +863,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.2.5")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.2.6")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -1864,21 +1887,27 @@ class Memory5(Star):
             save = getattr(self.config, "save_config", None)
             if callable(save):
                 save()
-                return True
         except Exception as exc:  # pragma: no cover
             logger.warning(f"memory5: 内存里复位归档开关失败 {type(exc).__name__}: {exc}")
 
-        return True
-        basic = data.get("basic") or {}
-        basic["archive_now"] = False
-        data["basic"] = basic
-        tmp = path + ".tmp"
+        # 某些 AstrBot 版本不会持久化内存配置；直接补写配置文件，避免重启后再次触发
+        path = os.path.join(DATA_DIR, "config", "memory5_config.json")
         try:
-            with open(tmp, "w", encoding="utf-8-sig") as fh:
-                json.dump(data, fh, ensure_ascii=False, indent=2)
-            os.replace(tmp, path)
-        except OSError as exc:
-            logger.warning(f"memory5: 复位归档开关失败 {exc}")
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8-sig") as fh:
+                    data = json.loads(fh.read() or "{}")
+                if isinstance(data, dict):
+                    basic = data.get("basic")
+                    if not isinstance(basic, dict):
+                        basic = {}
+                        data["basic"] = basic
+                    basic["archive_now"] = False
+                    tmp = path + ".tmp"
+                    with open(tmp, "w", encoding="utf-8-sig") as fh:
+                        json.dump(data, fh, ensure_ascii=False, indent=2)
+                    os.replace(tmp, path)
+        except Exception as exc:  # pragma: no cover
+            logger.warning(f"memory5: 持久化归档开关复位失败 {type(exc).__name__}: {exc}")
         return True
 
     # -------------------------------------------------------------- remind
@@ -2625,7 +2654,6 @@ class Memory5(Star):
             else:
                 await self._auth_notice(sender, "当前没有待确认的授权，请在面板点「重发授权」获取验证码。")
             return
-        code = match.group(1)
         event.stop_event()
         try:
             event.should_call_llm(False)
