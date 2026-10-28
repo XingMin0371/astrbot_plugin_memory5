@@ -588,8 +588,8 @@ class _TasksMixin:
             confidence = 1.0
         if not scope or not qq or not alias:
             raise ValueError("缺少 scope / qq / 别名")
-        if not re.fullmatch(r"\d{5,12}", qq):
-            raise ValueError("QQ号需为 5-12 位数字")
+        if not qq or len(qq) > 128 or re.search(r"[\s/\\]", qq):
+            raise ValueError("账号格式不合法")
         path = os.path.join(scope_dir(scope), "aliases.json")
         data = read_json(path, {}) or {}
         bucket = data.get(qq, [])

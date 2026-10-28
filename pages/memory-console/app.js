@@ -1255,7 +1255,7 @@ async function renderAliases(scope) {
   addRow.className = "actions";
   const qqInput = document.createElement("input");
   qqInput.type = "text";
-  qqInput.placeholder = "QQ号";
+  qqInput.placeholder = "QQ号或平台账号";
   qqInput.style.maxWidth = "140px";
   const nameInput = document.createElement("input");
   nameInput.type = "text";
