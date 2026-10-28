@@ -165,6 +165,23 @@ try:
 except Exception:  # pragma: no cover
     TextPart = None  # type: ignore[assignment]
 
+
+def _temporary_text_part(text: str):
+    """兼容 make_as_temp / mark_as_temp；不支持临时标记时返回 None。"""
+    if TextPart is None:
+        return None
+    part = TextPart(text=text)
+    for name in ("make_as_temp", "mark_as_temp"):
+        marker = getattr(part, name, None)
+        if not callable(marker):
+            continue
+        try:
+            marked = marker()
+            return marked if marked is not None else part
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
 DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
 TZ = timezone(timedelta(hours=8))
 
@@ -1394,9 +1411,11 @@ class Memory5(Star):
             if not block:
                 return
             text = DEFAULT_HEADER + "\n" + block
-            if TextPart is not None:
-                req.extra_user_content_parts.append(TextPart(text=text).mark_as_temp())
+            part = _temporary_text_part(text)
+            if part is not None:
+                req.extra_user_content_parts.append(part)
             else:
+                # 极老版本/AstrBot 缺少临时标记时才退回 system prompt
                 req.system_prompt = (req.system_prompt or "") + "\n\n" + text
         except Exception as exc:  # 记忆出错不影响对话
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
@@ -1889,25 +1908,6 @@ class Memory5(Star):
                 save()
         except Exception as exc:  # pragma: no cover
             logger.warning(f"memory5: 内存里复位归档开关失败 {type(exc).__name__}: {exc}")
-
-        # 某些 AstrBot 版本不会持久化内存配置；直接补写配置文件，避免重启后再次触发
-        path = os.path.join(DATA_DIR, "config", "memory5_config.json")
-        try:
-            if os.path.isfile(path):
-                with open(path, encoding="utf-8-sig") as fh:
-                    data = json.loads(fh.read() or "{}")
-                if isinstance(data, dict):
-                    basic = data.get("basic")
-                    if not isinstance(basic, dict):
-                        basic = {}
-                        data["basic"] = basic
-                    basic["archive_now"] = False
-                    tmp = path + ".tmp"
-                    with open(tmp, "w", encoding="utf-8-sig") as fh:
-                        json.dump(data, fh, ensure_ascii=False, indent=2)
-                    os.replace(tmp, path)
-        except Exception as exc:  # pragma: no cover
-            logger.warning(f"memory5: 持久化归档开关复位失败 {type(exc).__name__}: {exc}")
         return True
 
     # -------------------------------------------------------------- remind
