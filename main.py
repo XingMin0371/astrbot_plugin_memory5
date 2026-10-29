@@ -453,7 +453,10 @@ def now() -> datetime:
 
 
 def day_str(dt: datetime | None = None) -> str:
-    return (dt or now()).strftime("%Y-%m-%d")
+    value = dt or now()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=TZ)
+    return value.astimezone(TZ).strftime("%Y-%m-%d")
 
 
 def parse_dt(raw: str) -> datetime | None:
