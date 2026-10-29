@@ -3,7 +3,7 @@
 设计要点：
 - 存储按 scope 分目录：group_群号 / private_QQ号
 - 增量抽取（默认每 12 小时），处理积压消息
-- 注入按 长期（仅当前窗口）→ 重要 → 近期 → 提醒 分层，带总预算；提醒最靠近当前提问
+- 注入按 长期（当前窗口）→ 共享身份 → 重要 → 近期 → 提醒 分层，带总预算；提醒最靠近当前提问
 - 提醒由插件自己按到期时间分多次发送
 """
 
@@ -1261,7 +1261,43 @@ class Memory5(Star):
                 is_dup(matched.group("text") if matched else line)
             chunks.append("【长期记忆】\n" + core)
 
-        # 长期记忆只使用当前窗口的 core，不再跨群/私聊拼接身份。
+        # 跨 scope 共享：只取能对上 QQ 的身份/称呼（各≤5），关系不限。
+        # 长期事实仍以当前窗口为主，共享只补充跨窗口身份，不把整份 core 搬过来。
+        relevant = {str(sender)} | self._mentions(text)
+        shared_identity: list[str] = []
+        shared_callname: list[str] = []
+        shared_relation: list[str] = []
+        for other in set(self.scopes):
+            if other == scope:
+                continue
+            for line in self._core_text(other).splitlines():
+                matched = CORE_LINE_RE.match(line.strip())
+                if not matched:
+                    continue
+                if matched.group("subject") not in relevant:
+                    continue
+                topic = matched.group("topic")
+                if is_dup(matched.group("text")):
+                    continue
+                if topic == "身份":
+                    shared_identity.append(line)
+                elif topic == "称呼":
+                    shared_callname.append(line)
+                elif topic == "关系":
+                    shared_relation.append(line)
+        shared = shared_identity[: self._int("identity_max", 5)] + shared_callname[: self._int("callname_max", 5)]
+        relation_budget = self._int("shared_relation_max_chars", 600)
+        relation_lines: list[str] = []
+        used_chars = 0
+        for line in shared_relation:
+            if used_chars + len(line) > relation_budget:
+                break
+            relation_lines.append(line)
+            used_chars += len(line)
+        shared += relation_lines
+        if shared:
+            chunks.append("【身份（共享）】\n" + "\n".join(shared))
+
         # 重要：匹配当前消息的条目全放（总量由预算兜底），已在长期记忆里的跳过
         important = read_jsonl(scope_paths(scope)["important"])
         picked = [e for e in important if self._match(e, text, sender) and not is_dup(str(e.get("text", "")))]
