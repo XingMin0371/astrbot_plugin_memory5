@@ -3,7 +3,7 @@
 设计要点：
 - 存储按 scope 分目录：group_群号 / private_QQ号
 - 增量抽取（默认每 12 小时），处理积压消息
-- 注入按 核心 → 重要 → 提醒 → 普通（匹配 + 随机）→ 低密度 分层，带总预算
+- 注入按 长期 → 共享身份 → 重要 → 近期 → 提醒 分层，带总预算；提醒最靠近当前提问
 - 提醒由插件自己按到期时间分多次发送
 """
 
@@ -1404,11 +1404,14 @@ class Memory5(Star):
                 lines.pop()
             chunks[0] = "\n".join([header] + lines)
 
+        # Keep the order stable for caching and for a clear read:
+        # long-term -> shared identity -> important -> recent -> reminders.
+        # Reminders go closest to the current turn, so they are last.
         parts_out = list(chunks)
-        if remind_chunk:
-            parts_out.append(remind_chunk)
         if recent_chunk:
             parts_out.append(recent_chunk)
+        if remind_chunk:
+            parts_out.append(remind_chunk)
         return "\n\n".join(parts_out)
 
     def _clean_pending_context(self, req) -> int:
