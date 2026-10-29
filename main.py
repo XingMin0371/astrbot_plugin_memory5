@@ -202,6 +202,33 @@ TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
 DEFAULT_BLOCKED = ["习近平", "法轮功", "六四", "色情", "裸聊", "约炮", "毒品", "冰毒", "赌博", "枪支", "暴恐", "自杀"]
 
+_COMMAND_PREFIXES = ("/", "／", "!", "！", "#", "＃")
+_COMMAND_OUTPUT_PREFIXES = (
+    "节省上下文：",
+    "上下文清理：",
+    "用法：/节省上下文",
+    "用法：/上下文清理",
+    "只有管理员可以使用节省上下文",
+    "持久清理未开启",
+    "清理已取消：",
+)
+
+
+def is_command_text(text: str) -> bool:
+    """Conservative command detector used before writing raw history."""
+    stripped = str(text or "").lstrip()
+    if not stripped:
+        return False
+    if stripped.startswith(_COMMAND_PREFIXES):
+        return True
+    # @bot /command
+    return bool(re.match(r"^@\S+\s+[/／!！]", stripped))
+
+
+def is_command_output(text: str) -> bool:
+    stripped = str(text or "").lstrip()
+    return any(stripped.startswith(prefix) for prefix in _COMMAND_OUTPUT_PREFIXES)
+
 
 def _to_int(value, default: int) -> int:
     """评分字段转整数；0 是合法值（信息量为 0），不能当空值。"""
@@ -827,7 +854,7 @@ def merge_from_db(scope: str, since_ts: str) -> int:
         text = re.sub(r"@None\s*", "", text).strip()
         if not text or any(mark in text for mark in skip_marks):
             continue
-        if text.startswith("/记忆查看"):
+        if is_command_text(text) or is_command_output(text):
             continue
         try:
             dt = datetime.fromisoformat(str(created)).replace(tzinfo=timezone.utc)
@@ -890,6 +917,7 @@ class Memory5(Star):
         self._blocked_index: dict[str, list[str]] | None = None
         self._archiving = False
         self._suppress: dict[str, float] = {}
+        self._last_command_at: dict[str, float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
         self._bg_tasks: list[asyncio.Task] = []
@@ -1052,8 +1080,10 @@ class Memory5(Star):
                 # 鱼鱼自己：没有文字（纯图片/表情）就不记
                 if not text:
                     return
-                # /记忆查看 的输出不记
-                if text in self._suppress:
+                # /记忆查看 的输出不记；其他插件的命令回复也尽量不记
+                if text in self._suppress or is_command_output(text):
+                    return
+                if scope and time.time() - self._last_command_at.get(scope, 0) < 15:
                     return
                 append_raw(scope, sender, str(event.get_sender_name() or ""), text)
                 return
@@ -1063,7 +1093,9 @@ class Memory5(Star):
                 return
             if sender in self.blacklist_qqs():
                 return
-            if text.startswith("/记忆查看") or text.startswith("记忆查看"):
+            if is_command_text(text):
+                if scope:
+                    self._last_command_at[scope] = time.time()
                 return
             append_raw(scope, sender, str(event.get_sender_name() or ""), text)
         except Exception as exc:  # pragma: no cover
