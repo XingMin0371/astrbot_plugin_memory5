@@ -206,6 +206,31 @@
             "default": 1200
           }
         }
+      },
+      "shared": {
+        "description": "跨窗口共享",
+        "hint": "只共享能对上 QQ 的身份、称呼和关系，不搬运其他窗口的长期 core。",
+        "type": "object",
+        "items": {
+          "identity_max": {
+            "description": "共享身份条数",
+            "hint": "每个 QQ 最多注入的身份信息条数。",
+            "type": "int",
+            "default": 5
+          },
+          "callname_max": {
+            "description": "共享称呼条数",
+            "hint": "每个 QQ 最多注入的称呼条数。",
+            "type": "int",
+            "default": 5
+          },
+          "shared_relation_max_chars": {
+            "description": "共享关系上限",
+            "hint": "关系类共享记忆的字符上限。",
+            "type": "int",
+            "default": 600
+          }
+        }
       }
     }
   },
