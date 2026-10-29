@@ -63,6 +63,12 @@
         "type": "bool",
         "default": true
       },
+      "cache_friendly": {
+        "description": "缓存友好注入",
+        "hint": "默认开启：不改写历史前缀，把记忆放在当前用户消息前部，尽量保留上游 Prompt Cache，并提高记忆显著性。",
+        "type": "bool",
+        "default": true
+      },
       "archive_now": {
         "description": "立即归档一次",
         "hint": "立即执行一次归档，完成后自动取消勾选。",
@@ -265,7 +271,7 @@
       },
       "low_context_clean": {
         "description": "额外清理原始对话上下文",
-        "hint": "默认关闭。日记里的低密度条目到期后本就不会再注入；这个开关只额外清理 AstrBot 原始对话上下文，不会删除日记",
+        "hint": "默认关闭。开启后会清理 AstrBot 原始对话上下文中的低密度/无效内容；这是独立的旧清理开关，不会删除日记",
         "type": "bool",
         "default": false
       }
@@ -438,7 +444,7 @@
     "items": {
       "extra_blocked_words": {
         "description": "额外屏蔽词",
-        "hint": "内置词表见插件目录 blocked_words.txt（启动后会显示实际条数与路径）；此处补充额外屏蔽词，归档命中时会被替换。",
+        "hint": "内置词表 102 条（/AstrBot/data/plugins/memory5/blocked_words.txt）；此处补充额外屏蔽词，归档命中时会被替换。",
         "type": "list",
         "default": []
       }

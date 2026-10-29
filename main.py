@@ -196,7 +196,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.2.7"
+VERSION = "2.2.8"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -880,7 +880,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.2.7")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.2.8")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -1400,8 +1400,11 @@ class Memory5(Star):
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         try:
             scope = self.scope_of(event)
+            cache_friendly = bool(self._get("cache_friendly", True))
+            # Archive-triggered pending cleanup is the original behavior.
+            # Only the low-density context cleanup has its own switch.
             self._clean_pending_context(req)
-            if scope:
+            if bool(self._get("low_context_clean", False)) and scope:
                 self._clean_context_low(req, scope)
             if not self.enabled_inject:
                 return
@@ -1411,12 +1414,25 @@ class Memory5(Star):
             if not block:
                 return
             text = DEFAULT_HEADER + "\n" + block
+            prompt = getattr(req, "prompt", None)
+            if cache_friendly and isinstance(prompt, str) and prompt.strip():
+                # Put memory immediately before the current user turn.  This
+                # keeps the historical prefix untouched while making the
+                # memory more salient than an appended afterthought.
+                req.prompt = text + "\n\n" + prompt.lstrip()
+                return
             part = _temporary_text_part(text)
             if part is not None:
                 req.extra_user_content_parts.append(part)
             else:
-                # 极老版本/AstrBot 缺少临时标记时才退回 system prompt
-                req.system_prompt = (req.system_prompt or "") + "\n\n" + text
+                if isinstance(prompt, str) and prompt.strip():
+                    req.prompt = prompt.rstrip() + "\n\n" + text
+                else:
+                    parts = getattr(req, "extra_user_content_parts", None)
+                    if isinstance(parts, list):
+                        parts.append({"type": "text", "text": text})
+                    else:
+                        req.system_prompt = (req.system_prompt or "") + "\n\n" + text
         except Exception as exc:  # 记忆出错不影响对话
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
 
