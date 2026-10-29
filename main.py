@@ -3,7 +3,7 @@
 设计要点：
 - 存储按 scope 分目录：group_群号 / private_QQ号
 - 增量抽取（默认每 12 小时），处理积压消息
-- 注入按 长期（当前窗口）→ 共享身份 → 重要 → 近期 → 提醒 分层，带总预算；提醒最靠近当前提问
+- 注入按 长期 → 共享身份 → 重要 → 近期 → 提醒 分层，带总预算；提醒最靠近当前提问
 - 提醒由插件自己按到期时间分多次发送
 """
 
@@ -1261,8 +1261,7 @@ class Memory5(Star):
                 is_dup(matched.group("text") if matched else line)
             chunks.append("【长期记忆】\n" + core)
 
-        # 跨 scope 共享：只取能对上 QQ 的身份/称呼（各≤5），关系不限。
-        # 长期事实仍以当前窗口为主，共享只补充跨窗口身份，不把整份 core 搬过来。
+        # 跨 scope 共享：只取能对上 QQ 的身份/称呼（各≤5），关系不限
         relevant = {str(sender)} | self._mentions(text)
         shared_identity: list[str] = []
         shared_callname: list[str] = []
