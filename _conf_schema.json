@@ -194,31 +194,6 @@
           }
         }
       },
-      "shared": {
-        "description": "共享记忆预算",
-        "hint": "跨会话共享的身份、称呼、关系。",
-        "type": "object",
-        "items": {
-          "identity_max": {
-            "description": "共享身份条数（条）",
-            "hint": "每个 QQ 最多注入的身份信息条数。",
-            "type": "int",
-            "default": 5
-          },
-          "callname_max": {
-            "description": "共享称呼条数（条）",
-            "hint": "每个 QQ 最多注入的称呼条数。",
-            "type": "int",
-            "default": 5
-          },
-          "shared_relation_max_chars": {
-            "description": "共享关系上限（字符）",
-            "hint": "关系类共享记忆的字符上限。",
-            "type": "int",
-            "default": 600
-          }
-        }
-      },
       "independent": {
         "description": "独立预算",
         "hint": "普通记忆单独计算，不占总预算。",
