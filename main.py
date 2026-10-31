@@ -1683,7 +1683,7 @@ class Memory5(Star):
         pool = [e for e in rest if e not in matched]
         random.shuffle(pool)
         pool.sort(key=lambda e: e.get("date", ""), reverse=True)
-        picked_random = pool[: self._int("random_min", 3)]
+        picked_random = pool[: self._int("random_min", 2)]
         for e in picked_random:
             if is_dup(str(e.get("text", ""))):
                 continue
