@@ -726,7 +726,7 @@
       },
       "gate_ambient_cooldown_seconds": {
         "description": "主动回复冷却秒数",
-        "hint": "两次主动请求之间的最小间隔；默认 120 秒。",
+        "hint": "同一发送者两次主动请求之间的最小间隔；默认 120 秒，不同发送者互不阻塞。",
         "type": "int",
         "default": 120
       },
