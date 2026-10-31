@@ -1317,6 +1317,15 @@ class Memory5(Star):
                         old_last, old_value = target_state.get(target, (0.0, 0.0))
                         value = old_value * math.exp(-max(0.0, now - old_last) / decay)
                         target_state[target] = (now, min(10.0, value + base * weight))
+                    # The sender also participates normally; only the extra
+                    # target share is new. No active reply is emitted for a
+                    # message aimed at somebody else.
+                    old_last, old_value = target_state.get(sender, (0.0, 0.0))
+                    attention = old_value * math.exp(-max(0.0, now - old_last) / decay)
+                    threshold = self._float_cfg("gate_attention_threshold", 4.6)
+                    if attention >= threshold and bool(self._get("gate_attention_reply_enabled", True)):
+                        score += 1
+                    target_state[sender] = (now, min(10.0, attention + self._attention_increment(score)))
                     event.should_call_llm(False)
                     return
 
