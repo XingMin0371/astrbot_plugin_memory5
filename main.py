@@ -1196,7 +1196,6 @@ class Memory5(Star):
                 event.message_str = combined
             text = combined
 
-            self._gate_recent.setdefault(scope, deque(maxlen=8))
             if not event.is_private_chat():
                 direct = self._gate_mentions_self(event) or any(
                     name.casefold() in text.casefold() for name in self._gate_names()
@@ -1206,7 +1205,6 @@ class Memory5(Star):
                     return
                 if self._gate_has_other_at(event):
                     event.should_call_llm(False)
-                    self._gate_recent[scope].append(text)
                     return
                 has_media = any(
                     type(comp).__name__ in ("Image", "Face", "Record", "Video")
@@ -1227,11 +1225,9 @@ class Memory5(Star):
                         self._ambient_last[scope] = now
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, text or "[图片]", image_urls)
-                    self._gate_recent[scope].append("[媒体]")
                     return
                 if self._gate_clear_skip(event, text):
                     event.should_call_llm(False)
-                    self._gate_recent[scope].append(text)
                     return
                 # Conservative score: skip obvious filler/media, judge the middle.
                 score = 0
