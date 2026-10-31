@@ -1767,7 +1767,7 @@ class Memory5(Star):
         if now - getattr(self, "_last_artifact_cleanup", 0.0) < 3600:
             return
         self._last_artifact_cleanup = now
-        max_days = max(1, self._int("artifact_retention_days", 30, 1))
+        max_days = max(1, self._int("artifact_retention_days", 15, 1))
         max_files = max(10, self._int("artifact_max_files", 500, 10))
         files = [os.path.join(target_dir, n) for n in os.listdir(target_dir)] if os.path.isdir(target_dir) else []
         files = [(os.path.getmtime(p), p) for p in files if os.path.isfile(p)]

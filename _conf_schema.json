@@ -756,7 +756,8 @@
       "artifact_retention_days": {
         "description": "工具归档保留天数",
         "type": "int",
-        "default": 30
+        "default": 15,
+        "hint": "工具 artifact 保留天数；默认 15。"
       },
       "artifact_max_files": {
         "description": "工具归档最大文件数",
