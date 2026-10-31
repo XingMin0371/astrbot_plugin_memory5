@@ -1214,7 +1214,7 @@ class Memory5(Star):
                 )
                 if has_media and not text:
                     probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
-                    cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 90, 0))
+                    cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 120, 0))
                     now = time.time()
                     if (random.random() < probability
                             and now - self._ambient_last.get(scope, 0) >= cooldown):
@@ -1254,7 +1254,7 @@ class Memory5(Star):
                 # Light attention: repeated nearby speakers earn a small
                 # continuation bonus, but never enough to override @/name.
                 now = time.time()
-                decay = max(30, self._int("gate_attention_decay_seconds", 600, 30))
+                decay = max(30, self._int("gate_attention_decay_seconds", 300, 30))
                 threshold = self._float_cfg("gate_attention_threshold", 4.0)
                 state = self._attention.setdefault(scope, {})
                 old_last, old_value = state.get(sender, (0.0, 0.0))
@@ -1265,7 +1265,7 @@ class Memory5(Star):
                     score += 1
                 state[sender] = (now, min(10.0, attention + (2.0 if score > 0 else 0.4)))
 
-                cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 90, 0))
+                cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 120, 0))
                 cooldown_ok = now - self._ambient_last.get(scope, 0) >= cooldown
 
                 if score <= 0:
