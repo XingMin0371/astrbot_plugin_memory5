@@ -223,6 +223,15 @@
 
 MIT
 
+## 主动回复
+
+- gate_attention_reply_enabled：注意力机制主动回复，默认开启。高注意力发送者在没有叫名字时也可能接话。
+- gate_attention_threshold：达到该注意力后允许主动接话。
+- gate_attention_decay_seconds：注意力衰减时间。
+- gate_ambient_reply_probability：相关提问/图片的主动概率。
+- gate_random_reply_enabled / gate_random_reply_probability：普通消息随机补充。
+- gate_ambient_cooldown_seconds：两次主动请求的最小间隔。
+
 ## 第三方思路与许可
 
 本项目只在实际新增功能中参考了少量公开思路，原有分层记忆、提醒、归档、压缩、图片清理等不计入参考点；具体项目和未采用项见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。镜像与架构均未复制源代码。
