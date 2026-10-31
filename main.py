@@ -1303,9 +1303,10 @@ class Memory5(Star):
                     self_id = ""
                 target_weights: dict[str, float] = {}
                 for target in other_targets:
-                    target_weights[target] = max(target_weights.get(target, 0.0), 0.5)
+                    if target and target not in (sender, self_id):
+                        target_weights[target] = max(target_weights.get(target, 0.0), 0.5)
                 for target in mention_targets:
-                    if target and target != self_id:
+                    if target and target not in (sender, self_id):
                         target_weights[target] = max(target_weights.get(target, 0.0), 1 / 3)
                 if target_weights:
                     now = time.time()
