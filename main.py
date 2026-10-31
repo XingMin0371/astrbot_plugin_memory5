@@ -937,7 +937,7 @@ class Memory5(Star):
         self._cold_cache: dict[str, deque] = {}
         self._index_snapshot: dict[str, tuple[str, float]] = {}
         self._last_request_at: dict[str, float] = {}
-        self._ambient_last: dict[str, float] = {}
+        self._ambient_last: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
         self._bg_tasks: list[asyncio.Task] = []
@@ -1180,6 +1180,7 @@ class Memory5(Star):
                 return
             text = (event.message_str or "").strip()
             sender = str(event.get_sender_id())
+            ambient_key = (scope, sender)
             self_ids = {str(x) for x in self.bot_qqs()}
             if sender in self_ids:
                 return
@@ -1226,14 +1227,14 @@ class Memory5(Star):
                     cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 120, 0))
                     now = time.time()
                     if (random.random() < probability
-                            and now - self._ambient_last.get(scope, 0) >= cooldown):
+                            and now - self._ambient_last.get(ambient_key, 0) >= cooldown):
                         image_urls = []
                         for comp in (event.get_messages() or []):
                             if type(comp).__name__ in ("Image", "Face"):
                                 value = getattr(comp, "url", "") or getattr(comp, "file", "")
                                 if value:
                                     image_urls.append(str(value))
-                        self._ambient_last[scope] = now
+                        self._ambient_last[ambient_key] = now
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, text or "[图片]", image_urls)
                     return
@@ -1273,11 +1274,11 @@ class Memory5(Star):
                 state[sender] = (now, min(10.0, attention + self._attention_increment(score)))
 
                 cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 120, 0))
-                cooldown_ok = now - self._ambient_last.get(scope, 0) >= cooldown
+                cooldown_ok = now - self._ambient_last.get(ambient_key, 0) >= cooldown
 
                 if score <= 0:
                     if attention_hit and cooldown_ok:
-                        self._ambient_last[scope] = now
+                        self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, event.message_str)
@@ -1285,7 +1286,7 @@ class Memory5(Star):
                     ambient = bool(self._get("gate_random_reply_enabled", False))
                     probability = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
                     if (ambient and random.random() < probability and cooldown_ok):
-                        self._ambient_last[scope] = now
+                        self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, event.message_str)
@@ -1297,7 +1298,7 @@ class Memory5(Star):
                     # Attention can proactively interject; related questions
                     # still use the lower-frequency ambient probability.
                     if attention_hit and cooldown_ok:
-                        self._ambient_last[scope] = now
+                        self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, event.message_str)
@@ -1305,7 +1306,7 @@ class Memory5(Star):
                     related = score >= 2
                     probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
                     if (related and random.random() < probability and cooldown_ok):
-                        self._ambient_last[scope] = now
+                        self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, event.message_str)
