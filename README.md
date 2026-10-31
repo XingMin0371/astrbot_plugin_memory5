@@ -232,6 +232,10 @@ MIT
 - gate_random_reply_enabled / gate_random_reply_probability：普通消息随机补充。
 - gate_ambient_cooldown_seconds：两次主动请求的最小间隔。
 
+## @ 注意力分配
+
+普通群消息 @ 别人时，被 @ 的对象获得这条消息注意力增量的一半；发送者这条消息不增加注意力，避免用 @ 刷自己的注意力。多个 @ 对象各自获得一半。
+
 ## 第三方思路与许可
 
 本项目只在实际新增功能中参考了少量公开思路，原有分层记忆、提醒、归档、压缩、图片清理等不计入参考点；具体项目和未采用项见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。镜像与架构均未复制源代码。

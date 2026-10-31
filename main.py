@@ -1103,18 +1103,19 @@ class Memory5(Star):
                     return True
         return False
 
-    def _gate_has_other_at(self, event: AstrMessageEvent) -> bool:
+    def _gate_other_at_targets(self, event: AstrMessageEvent) -> list[str]:
         try:
             self_id = str(event.get_self_id() or "")
         except Exception:
             self_id = ""
+        targets: list[str] = []
         for comp in event.get_messages() or []:
             if type(comp).__name__ != "At":
                 continue
             target = str(getattr(comp, "qq", "") or getattr(comp, "target", "") or "")
-            if target and target not in (self_id, "all", "everyone"):
-                return True
-        return False
+            if target and target not in (self_id, "all", "everyone") and target not in targets:
+                targets.append(target)
+        return targets
 
     def _remember_cold(self, scope: str, text: str) -> None:
         if not text:
@@ -1215,9 +1216,7 @@ class Memory5(Star):
                 if direct:
                     event.message_str = self._promote_cold(scope, text)
                     return
-                if self._gate_has_other_at(event):
-                    event.should_call_llm(False)
-                    return
+                other_targets = self._gate_other_at_targets(event)
                 has_media = any(
                     type(comp).__name__ in ("Image", "Face", "Record", "Video")
                     for comp in (event.get_messages() or [])
@@ -1258,6 +1257,20 @@ class Memory5(Star):
                     score += 1
                 if text.startswith("[") and text.endswith("]"):
                     score -= 1
+
+                # An @ target receives half of this message's attention; the
+                # sender does not, because the message is aimed elsewhere.
+                if other_targets:
+                    now = time.time()
+                    decay = max(30, self._int("gate_attention_decay_seconds", 360, 30))
+                    delta = self._attention_increment(score) * 0.5
+                    target_state = self._attention.setdefault(scope, {})
+                    for target in other_targets:
+                        old_last, old_value = target_state.get(target, (0.0, 0.0))
+                        value = old_value * math.exp(-max(0.0, now - old_last) / decay)
+                        target_state[target] = (now, min(10.0, value + delta))
+                    event.should_call_llm(False)
+                    return
 
                 # Light attention: repeated nearby speakers earn a small
                 # continuation bonus, but never enough to override @/name.
