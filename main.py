@@ -1145,6 +1145,17 @@ class Memory5(Star):
             return False
         return False
 
+    @staticmethod
+    def _attention_increment(score: int) -> float:
+        """Four local attention tiers; no model call and no extra tokens."""
+        if score <= 0:
+            return 0.3
+        if score == 1:
+            return 0.8
+        if score == 2:
+            return 1.3
+        return 2.0
+
     async def _ambient_request(self, event: AstrMessageEvent, text: str, image_urls: list[str] | None = None):
         conversation = None
         try:
@@ -1259,7 +1270,7 @@ class Memory5(Star):
                                  and bool(self._get("gate_attention_reply_enabled", True)))
                 if attention_hit:
                     score += 1
-                state[sender] = (now, min(10.0, attention + (2.0 if score > 0 else 0.4)))
+                state[sender] = (now, min(10.0, attention + self._attention_increment(score)))
 
                 cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 120, 0))
                 cooldown_ok = now - self._ambient_last.get(scope, 0) >= cooldown
