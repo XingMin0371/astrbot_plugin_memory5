@@ -226,9 +226,9 @@
           },
           "random_min": {
             "description": "随机注入条数（条）",
-            "hint": "在近期普通记忆中额外随机选取的条数；默认 3。",
+            "hint": "在近期普通记忆中额外随机选取的条数；默认 2。",
             "type": "int",
-            "default": 3
+            "default": 2
           },
           "low_max": {
             "description": "低密度注入条数（条）",
