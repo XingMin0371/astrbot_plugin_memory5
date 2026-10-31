@@ -180,12 +180,6 @@
             "type": "int",
             "default": 3000
           },
-          "random_min": {
-            "description": "随机注入条数（条）",
-            "hint": "在近期记忆中至少随机选取的条数。",
-            "type": "int",
-            "default": 3
-          },
           "important_max_chars": {
             "description": "重要上限（字符）",
             "hint": "重要段的字符预算，0 表示不限制。",
@@ -229,6 +223,12 @@
             "hint": "普通与低密度记忆单独计算，0 表示不限制。",
             "type": "int",
             "default": 1200
+          },
+          "random_min": {
+            "description": "随机注入条数（条）",
+            "hint": "在近期普通记忆中额外随机选取的条数；默认 3。",
+            "type": "int",
+            "default": 3
           }
         }
       },
@@ -681,8 +681,8 @@
       "gate_attention_decay_seconds": {
         "description": "注意力衰减秒数",
         "type": "int",
-        "default": 600,
-        "hint": "注意力衰减秒数；越大，近期互动记得越久；默认 600。"
+        "default": 300,
+        "hint": "注意力衰减秒数；默认 300（5 分钟），适合中等活跃群，避免上一轮话题残留太久。"
       },
       "gate_attention_threshold": {
         "description": "注意力加成阈值",
@@ -720,9 +720,9 @@
       },
       "gate_ambient_cooldown_seconds": {
         "description": "主动回复冷却秒数",
-        "hint": "两次主动请求之间的最小间隔；默认 90 秒。",
+        "hint": "两次主动请求之间的最小间隔；默认 120 秒。",
         "type": "int",
-        "default": 90
+        "default": 120
       },
       "gate_attention_reply_enabled": {
         "description": "注意力机制主动回复",
