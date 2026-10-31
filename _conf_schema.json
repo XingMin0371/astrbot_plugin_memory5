@@ -229,6 +229,12 @@
             "hint": "在近期普通记忆中额外随机选取的条数；默认 3。",
             "type": "int",
             "default": 3
+          },
+          "low_max": {
+            "description": "低密度注入条数（条）",
+            "hint": "近期低密度记忆中最多注入几条；默认 1。",
+            "type": "int",
+            "default": 1
           }
         }
       },
@@ -681,8 +687,8 @@
       "gate_attention_decay_seconds": {
         "description": "注意力衰减秒数",
         "type": "int",
-        "default": 300,
-        "hint": "注意力衰减秒数；默认 300（5 分钟），适合中等活跃群，避免上一轮话题残留太久。"
+        "default": 360,
+        "hint": "注意力衰减秒数；默认 360（6 分钟），兼顾活跃段连续性和话题切换。"
       },
       "gate_attention_threshold": {
         "description": "注意力加成阈值",
