@@ -1149,9 +1149,9 @@ class Memory5(Star):
     def _attention_increment(score: int) -> float:
         """Four local attention tiers; no model call and no extra tokens."""
         if score <= 0:
-            return 0.3
+            return 0.2
         if score == 1:
-            return 0.8
+            return 0.7
         if score == 2:
             return 1.3
         return 2.0
