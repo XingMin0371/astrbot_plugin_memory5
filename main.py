@@ -1117,6 +1117,42 @@ class Memory5(Star):
                 targets.append(target)
         return targets
 
+    def _gate_mention_targets(self, scope: str, text: str, sender: str) -> list[str]:
+        """Resolve exact QQ digits and aliases without short-alias noise."""
+        try:
+            aliases = load_aliases(scope)
+        except Exception:
+            return []
+        if not isinstance(aliases, dict):
+            return []
+        known = set()
+        for qq, entries in aliases.items():
+            qq = str(qq or "").strip()
+            if not qq.isdigit() or qq == sender:
+                continue
+            known.add(qq)
+        targets: list[str] = []
+        folded = (text or "").casefold()
+        for qq, entries in aliases.items():
+            qq = str(qq or "").strip()
+            if qq == sender or qq not in known:
+                continue
+            for entry in entries or []:
+                alias = str(entry.get("alias", "") if isinstance(entry, dict) else "").strip()
+                if len(alias) < 2 or not re.search(r"[\w\u4e00-\u9fff]", alias):
+                    continue
+                if alias.casefold() in folded:
+                    if qq not in targets:
+                        targets.append(qq)
+                    break
+        # QQ numbers need a strict 5-12 digit boundary; this avoids matching
+        # versions, dates, prices, and IDs embedded in longer numbers.
+        for match in re.finditer(r"(?<!\d)(\d{5,12})(?!\d)", text or ""):
+            qq = match.group(1)
+            if qq in known and qq != sender and qq not in targets:
+                targets.append(qq)
+        return targets
+
     def _remember_cold(self, scope: str, text: str) -> None:
         if not text:
             return
@@ -1258,17 +1294,28 @@ class Memory5(Star):
                 if text.startswith("[") and text.endswith("]"):
                     score -= 1
 
-                # An @ target receives half of this message's attention; the
-                # sender does not, because the message is aimed elsewhere.
-                if other_targets:
+                # @ gets half; nickname/QQ/alias mention gets one third.
+                # If both match the same target, keep the larger half share.
+                mention_targets = self._gate_mention_targets(scope, text, sender)
+                try:
+                    self_id = str(event.get_self_id() or "")
+                except Exception:
+                    self_id = ""
+                target_weights: dict[str, float] = {}
+                for target in other_targets:
+                    target_weights[target] = max(target_weights.get(target, 0.0), 0.5)
+                for target in mention_targets:
+                    if target and target != self_id:
+                        target_weights[target] = max(target_weights.get(target, 0.0), 1 / 3)
+                if target_weights:
                     now = time.time()
                     decay = max(30, self._int("gate_attention_decay_seconds", 360, 30))
-                    delta = self._attention_increment(score) * 0.5
+                    base = self._attention_increment(score)
                     target_state = self._attention.setdefault(scope, {})
-                    for target in other_targets:
+                    for target, weight in target_weights.items():
                         old_last, old_value = target_state.get(target, (0.0, 0.0))
                         value = old_value * math.exp(-max(0.0, now - old_last) / decay)
-                        target_state[target] = (now, min(10.0, value + delta))
+                        target_state[target] = (now, min(10.0, value + base * weight))
                     event.should_call_llm(False)
                     return
 
