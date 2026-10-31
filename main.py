@@ -1301,13 +1301,20 @@ class Memory5(Star):
                     self_id = str(event.get_self_id() or "")
                 except Exception:
                     self_id = ""
-                target_weights: dict[str, float] = {}
+                at_weights: dict[str, float] = {}
+                mention_weights: dict[str, float] = {}
                 for target in other_targets:
                     if target and target not in (sender, self_id):
-                        target_weights[target] = max(target_weights.get(target, 0.0), 0.5)
+                        at_weights[target] = 0.5
                 for target in mention_targets:
                     if target and target not in (sender, self_id):
-                        target_weights[target] = max(target_weights.get(target, 0.0), 1 / 3)
+                        mention_weights[target] = max(mention_weights.get(target, 0.0), 1 / 3)
+                # @ wins the sender share when both styles are present;
+                # multiple targets each get their own share, never a split.
+                sender_weight = 0.5 if at_weights else (2 / 3 if mention_weights else 1.0)
+                target_weights = dict(at_weights)
+                for target, weight in mention_weights.items():
+                    target_weights[target] = max(target_weights.get(target, 0.0), weight)
                 if target_weights:
                     now = time.time()
                     decay = max(30, self._int("gate_attention_decay_seconds", 360, 30))
@@ -1317,15 +1324,15 @@ class Memory5(Star):
                         old_last, old_value = target_state.get(target, (0.0, 0.0))
                         value = old_value * math.exp(-max(0.0, now - old_last) / decay)
                         target_state[target] = (now, min(10.0, value + base * weight))
-                    # The sender also participates normally; only the extra
-                    # target share is new. No active reply is emitted for a
-                    # message aimed at somebody else.
+                    # The sender gets the remaining share, but this message
+                    # still must not emit an active reply for somebody else.
                     old_last, old_value = target_state.get(sender, (0.0, 0.0))
                     attention = old_value * math.exp(-max(0.0, now - old_last) / decay)
                     threshold = self._float_cfg("gate_attention_threshold", 4.6)
                     if attention >= threshold and bool(self._get("gate_attention_reply_enabled", True)):
                         score += 1
-                    target_state[sender] = (now, min(10.0, attention + self._attention_increment(score)))
+                    sender_delta = self._attention_increment(score) * sender_weight
+                    target_state[sender] = (now, min(10.0, attention + sender_delta))
                     event.should_call_llm(False)
                     return
 
