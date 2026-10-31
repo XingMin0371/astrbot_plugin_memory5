@@ -1254,7 +1254,7 @@ class Memory5(Star):
                 # Light attention: repeated nearby speakers earn a small
                 # continuation bonus, but never enough to override @/name.
                 now = time.time()
-                decay = max(30, self._int("gate_attention_decay_seconds", 300, 30))
+                decay = max(30, self._int("gate_attention_decay_seconds", 360, 30))
                 threshold = self._float_cfg("gate_attention_threshold", 4.0)
                 state = self._attention.setdefault(scope, {})
                 old_last, old_value = state.get(sender, (0.0, 0.0))
@@ -1693,7 +1693,7 @@ class Memory5(Star):
             normal.append(line)
             normal_used += len(line)
         if low:
-            for e in low[:3]:
+            for e in low[: self._int("low_max", 1)]:
                 if is_dup(str(e.get("text", ""))):
                     continue
                 line = f"- {e['text']}"
