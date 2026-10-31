@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import difflib
 import json
+import math
 import os
 import random
 import secrets
@@ -20,7 +22,7 @@ import re
 import shutil
 import sqlite3
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -75,6 +77,8 @@ try:  # 包内正常加载
         crypto_version,
         enc_key,
         ensure_key,
+        encrypt_bytes,
+        decrypt_bytes,
         encrypt_tree,
         generate_new_key,
         key_age_seconds,
@@ -104,6 +108,8 @@ except ImportError:  # 单文件方式加载（本地测试）
         crypto_version,
         enc_key,
         ensure_key,
+        encrypt_bytes,
+        decrypt_bytes,
         encrypt_tree,
         generate_new_key,
         key_age_seconds,
@@ -184,6 +190,10 @@ def _temporary_text_part(text: str):
 
 DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
 TZ = timezone(timedelta(hours=8))
+# Internal cache protection; intentionally not exposed as separate settings.
+CACHE_GUARD_MINUTES = 120
+CACHE_PREFIX_MESSAGES = 105
+PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
 
 
 _SCOPE_RE = re.compile(r"^(group|private):[A-Za-z0-9_-]{1,64}$")
@@ -196,7 +206,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.2.9"
+VERSION = "2.3.3"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -910,7 +920,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.2.9")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.3.3")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -921,6 +931,13 @@ class Memory5(Star):
         self._archiving = False
         self._suppress: dict[str, float] = {}
         self._last_command_at: dict[str, float] = {}
+        self._gate_buffers: dict[str, list[str]] = {}
+        self._gate_seq: dict[str, int] = {}
+        self._attention: dict[str, dict[str, tuple[float, float]]] = {}
+        self._cold_cache: dict[str, deque] = {}
+        self._index_snapshot: dict[str, tuple[str, float]] = {}
+        self._last_request_at: dict[str, float] = {}
+        self._ambient_last: dict[str, float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
         self._bg_tasks: list[asyncio.Task] = []
@@ -961,6 +978,12 @@ class Memory5(Star):
             return max(0, int(self._get(key, default)))
         except (TypeError, ValueError):
             return default
+
+    def _float_cfg(self, key, default):
+        try:
+            return float(self._get(key, default))
+        except (TypeError, ValueError):
+            return float(default)
 
     def _classify(self, stability: int, impact: int, info: int, due: datetime | None) -> str:
         if due is not None:
@@ -1011,11 +1034,11 @@ class Memory5(Star):
 
     @property
     def keep_core(self) -> int:
-        return self._int("core_max_chars", 2000, 300)
+        return self._int("core_max_chars", 3000, 300)
 
     @property
     def budget(self) -> int:
-        return self._int("inject_budget_chars", 3600, 300)
+        return self._int("inject_budget_chars", 4800, 300)
 
     @property
     def normal_budget(self) -> int:
@@ -1053,6 +1076,227 @@ class Memory5(Star):
             record_umo(scope, umo)
             return scope
         return None
+
+    # --------------------------------------------------------- light gate
+    def _gate_names(self) -> list[str]:
+        raw = self._get("gate_names", ["鱼鱼", "小鲸鱼", "D指导", "鲸鲸"])
+        if isinstance(raw, str):
+            raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
+        return [str(x) for x in raw]
+
+    def _gate_mentions_self(self, event: AstrMessageEvent) -> bool:
+        try:
+            self_id = str(event.get_self_id() or "")
+        except Exception:
+            self_id = ""
+        for comp in event.get_messages() or []:
+            name = type(comp).__name__
+            if name == "Reply":
+                target = str(getattr(comp, "sender_id", "") or "")
+                if target and target == self_id:
+                    return True
+            if name == "At":
+                target = str(getattr(comp, "qq", "") or getattr(comp, "target", "") or "")
+                if target == "all" or target == "everyone":
+                    return False
+                if target and target == self_id:
+                    return True
+        return False
+
+    def _gate_has_other_at(self, event: AstrMessageEvent) -> bool:
+        try:
+            self_id = str(event.get_self_id() or "")
+        except Exception:
+            self_id = ""
+        for comp in event.get_messages() or []:
+            if type(comp).__name__ != "At":
+                continue
+            target = str(getattr(comp, "qq", "") or getattr(comp, "target", "") or "")
+            if target and target not in (self_id, "all", "everyone"):
+                return True
+        return False
+
+    def _remember_cold(self, scope: str, text: str) -> None:
+        if not text:
+            return
+        max_items = max(1, self._int("cold_cache_max_messages", 20, 1))
+        cache = self._cold_cache.setdefault(scope, deque(maxlen=max_items))
+        cache.append((time.time(), text))
+
+    def _promote_cold(self, scope: str, text: str) -> str:
+        cache = self._cold_cache.get(scope)
+        if not cache:
+            return text
+        ttl = max(30, self._int("cold_cache_seconds", 900, 30))
+        cutoff = time.time() - ttl
+        kept = [item for item in cache if item[0] >= cutoff]
+        cache.clear()
+        if not kept:
+            return text
+        lines = [item[1] for item in kept if item[1]]
+        return "\n".join(lines + [text]) if text else "\n".join(lines)
+
+    def _gate_clear_skip(self, event: AstrMessageEvent, text: str) -> bool:
+        if not text:
+            return False
+        if text in {"嗯", "哦", "噢", "啊", "好", "行", "可以", "收到", "谢谢", "哈哈", "哈哈哈", "笑死", "在吗", "1", "6"}:
+            return True
+        if text.startswith("/") or text.startswith("／"):
+            return False
+        return False
+
+    async def _ambient_request(self, event: AstrMessageEvent, text: str, image_urls: list[str] | None = None):
+        conversation = None
+        try:
+            manager = getattr(self.context, "conversation_manager", None)
+            if manager is not None:
+                umo = str(getattr(event, "unified_msg_origin", "") or "")
+                cid = await manager.get_curr_conversation_id(umo)
+                if cid:
+                    conversation = await manager.get_conversation(umo, cid)
+        except Exception:
+            conversation = None
+        return event.request_llm(prompt=text, conversation=conversation, image_urls=image_urls or [])
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def light_gate(self, event: AstrMessageEvent):
+        """Cheap rule gate; selected ambient messages explicitly request the LLM."""
+        if not bool(self._get("gate_enabled", False)):
+            return
+        try:
+            scope = self.scope_of(event)
+            if not scope or scope not in self.scopes:
+                return
+            text = (event.message_str or "").strip()
+            sender = str(event.get_sender_id())
+            self_ids = {str(x) for x in self.bot_qqs()}
+            if sender in self_ids:
+                return
+            if event.is_at_or_wake_command:
+                return
+            if text.startswith("/") or text.startswith("／"):
+                return
+            if sender in self.blacklist_qqs():
+                event.should_call_llm(False)
+                return
+
+            debounce = max(0, self._int_raw("gate_debounce_ms", 700)) / 1000.0
+            seq = self._gate_seq.get(scope, 0) + 1
+            self._gate_seq[scope] = seq
+            buffer = self._gate_buffers.setdefault(scope, [])
+            buffer.append(text)
+            if debounce:
+                await asyncio.sleep(debounce)
+            if self._gate_seq.get(scope) != seq:
+                event.should_call_llm(False)
+                return
+            combined = "\n".join([x for x in buffer if x]).strip()
+            buffer.clear()
+            if combined and combined != event.message_str:
+                event.message_str = combined
+            text = combined
+
+            self._gate_recent.setdefault(scope, deque(maxlen=8))
+            if not event.is_private_chat():
+                direct = self._gate_mentions_self(event) or any(
+                    name.casefold() in text.casefold() for name in self._gate_names()
+                )
+                if direct:
+                    event.message_str = self._promote_cold(scope, text)
+                    return
+                if self._gate_has_other_at(event):
+                    event.should_call_llm(False)
+                    self._gate_recent[scope].append(text)
+                    return
+                has_media = any(
+                    type(comp).__name__ in ("Image", "Face", "Record", "Video")
+                    for comp in (event.get_messages() or [])
+                )
+                if has_media and not text:
+                    probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
+                    cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 90, 0))
+                    now = time.time()
+                    if (random.random() < probability
+                            and now - self._ambient_last.get(scope, 0) >= cooldown):
+                        image_urls = []
+                        for comp in (event.get_messages() or []):
+                            if type(comp).__name__ in ("Image", "Face"):
+                                value = getattr(comp, "url", "") or getattr(comp, "file", "")
+                                if value:
+                                    image_urls.append(str(value))
+                        self._ambient_last[scope] = now
+                        event.should_call_llm(False)
+                        yield await self._ambient_request(event, text or "[图片]", image_urls)
+                    self._gate_recent[scope].append("[媒体]")
+                    return
+                if self._gate_clear_skip(event, text):
+                    event.should_call_llm(False)
+                    self._gate_recent[scope].append(text)
+                    return
+                # Conservative score: skip obvious filler/media, judge the middle.
+                score = 0
+                if has_media:
+                    score += 2
+                if "?" in text or "？" in text:
+                    score += 2
+                if any(word in text for word in (
+                    "什么", "怎么", "为什么", "哪", "谁", "多少", "几点",
+                    "吗", "呢", "要不要", "可以吗", "是不是", "有没有", "在吗",
+                )):
+                    score += 2
+                if len(text) >= 6:
+                    score += 1
+                if any(ch in text for ch in ("你", "你们", "鱼")):
+                    score += 1
+                if text.startswith("[") and text.endswith("]"):
+                    score -= 1
+
+                # Light attention: repeated nearby speakers earn a small
+                # continuation bonus, but never enough to override @/name.
+                now = time.time()
+                decay = max(30, self._int("gate_attention_decay_seconds", 600, 30))
+                state = self._attention.setdefault(scope, {})
+                old_last, old_value = state.get(sender, (0.0, 0.0))
+                attention = old_value * math.exp(-max(0.0, now - old_last) / decay)
+                if attention >= self._float_cfg("gate_attention_threshold", 2.0):
+                    score += 1
+                state[sender] = (now, min(10.0, attention + (2.0 if score > 0 else 0.4)))
+
+                if score <= 0:
+                    ambient = bool(self._get("gate_random_reply_enabled", False))
+                    probability = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
+                    cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 90, 0))
+                    now = time.time()
+                    if (ambient and random.random() < probability
+                            and now - self._ambient_last.get(scope, 0) >= cooldown):
+                        self._ambient_last[scope] = now
+                        event.message_str = self._promote_cold(scope, text)
+                        event.should_call_llm(False)
+                        yield await self._ambient_request(event, event.message_str)
+                        return
+                    self._remember_cold(scope, text)
+                    event.should_call_llm(False)
+                    self._gate_recent[scope].append(text)
+                    return
+                else:
+                    # Related questions get a low-frequency ambient chance;
+                    # unrelated messages still leave the default pipeline intact.
+                    related = score >= 2
+                    probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
+                    cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 90, 0))
+                    now = time.time()
+                    if (related and random.random() < probability
+                            and now - self._ambient_last.get(scope, 0) >= cooldown):
+                        self._ambient_last[scope] = now
+                        event.message_str = self._promote_cold(scope, text)
+                        event.should_call_llm(False)
+                        yield await self._ambient_request(event, event.message_str)
+                        return
+                    event.message_str = self._promote_cold(scope, text)
+                    return
+            self._gate_recent[scope].append(text)
+        except Exception as exc:  # gate failure must fail open
+            logger.debug(f"memory5: gate skipped ({type(exc).__name__}: {exc})")
 
     # ------------------------------------------------------------ collector
     @filter.event_message_type(filter.EventMessageType.ALL)
@@ -1110,6 +1354,40 @@ class Memory5(Star):
         return
 
     # --------------------------------------------------------- core memory
+    def _cache_protection(self) -> tuple[int, int]:
+        """Use own settings, but never weaker than an installed companion."""
+        prefix = max(0, self._int_raw("cache_prefix_messages", CACHE_PREFIX_MESSAGES))
+        guard = max(0, self._int_raw("cache_guard_minutes", CACHE_GUARD_MINUTES))
+        try:
+            path = os.path.join(DATA_DIR, "config", "astrbot_plugin_context_hygiene_config.json")
+            if os.path.exists(path):
+                other = json.load(open(path, encoding="utf-8-sig"))
+                other_prefix = int(other.get("compression", {}).get("cache_prefix_messages", prefix))
+                other_guard = int(other.get("basic", {}).get("cache_guard_minutes", guard))
+                prefix = min(prefix, max(0, other_prefix))
+                guard = max(guard, max(0, other_guard))
+        except Exception:
+            pass
+        return prefix, guard
+
+    def _snapshot_core(self, scope: str) -> str:
+        """Stable per-session index snapshot; writes do not rewrite the prefix."""
+        ttl = max(60, self._int("index_snapshot_ttl_seconds", 10800, 60))
+        cached = self._index_snapshot.get(scope)
+        now = time.time()
+        if cached and now - cached[1] < ttl:
+            return cached[0]
+        text = self._core_text(scope)
+        if text:
+            self._index_snapshot[scope] = (text, now)
+        return text
+
+    def _invalidate_index_snapshot(self, scope: str | None = None) -> None:
+        if scope is None:
+            self._index_snapshot.clear()
+        else:
+            self._index_snapshot.pop(scope, None)
+
     def _core_text(self, scope: str, limit: int | None = None) -> str:
         text = read_text(scope_paths(scope)["core"]).strip()
         limit = limit or self.keep_core
@@ -1157,9 +1435,9 @@ class Memory5(Star):
             return "".join(parts).strip()
         return ""
 
-    def _clean_context_low(self, req, scope: str) -> int:
-        """到保留期后，从请求上下文移除低密度/无效内容；不动日记文件。"""
-        if not bool(self._get("low_context_clean", False)):
+    def _clean_context_low(self, req, scope: str, allow_cleanup: bool = True) -> int:
+        """Idle-only low-density cleanup; never touch the stable cache prefix."""
+        if not allow_cleanup or not bool(self._get("low_context_clean", True)):
             return 0
         try:
             days = max(1, int(self._get("low_keep_days", 3)))
@@ -1182,11 +1460,15 @@ class Memory5(Star):
             return 0
         kept = []
         removed = 0
-        for item in contexts:
+        recent = max(0, self._int("keep_recent_turns", 15, 0)) * 2
+        recent_start = max(0, len(contexts) - recent)
+        prefix, _ = self._cache_protection()
+        for idx, item in enumerate(contexts):
             text = self._context_text(item) if isinstance(item, dict) else ""
             if text:
                 text = self._normalize_compare(self._normalize_time(text))
-            if text and text in low_text:
+            if (idx >= prefix and idx < recent_start
+                    and text and text in low_text):
                 removed += 1
                 continue
             kept.append(item)
@@ -1229,12 +1511,15 @@ class Memory5(Star):
     def _mentions(text: str) -> set[str]:
         return set(re.findall(r"\d{5,12}", text or ""))
 
-    def _match(self, entry: dict, text: str, sender: str) -> bool:
-        if str(entry.get("subject")) == str(sender):
-            return True
-        if str(entry.get("subject")) in self._mentions(text):
-            return True
+    def _match(self, entry: dict, text: str, sender: str, strict_topic: bool = False) -> bool:
         topic = str(entry.get("topic", ""))
+        subject = str(entry.get("subject"))
+        if subject == str(sender) or subject in self._mentions(text):
+            if strict_topic:
+                # Identity/relationship facts stay available; other important
+                # facts need a topic hit so unrelated private details do not leak.
+                return bool(topic and (topic in text or topic in PERSONA_TOPICS))
+            return True
         return bool(topic and topic in text)
 
     def build_block(self, scope: str, sender: str, text: str) -> str:
@@ -1254,12 +1539,30 @@ class Memory5(Star):
             seen.append(key)
             return False
 
-        core = self._core_text(scope)
+        expand_memory = any(word in text for word in (
+            "具体", "详情", "原话", "展开", "还记得", "哪次", "细节", "上次", "之前说",
+        ))
+        compact_memory = bool(self._get("compact_memory", True)) and not expand_memory
+        core = self._snapshot_core(scope)
         if core:
+            rendered_core: list[str] = []
             for line in core.splitlines():
                 matched = CORE_LINE_RE.match(line.strip())
                 is_dup(matched.group("text") if matched else line)
-            chunks.append("【长期记忆】\n" + core)
+                if not matched or not compact_memory or matched.group("topic") in PERSONA_TOPICS:
+                    rendered_core.append(line)
+                    continue
+                body = matched.group("text")
+                sentence = re.split(r"[。！？!?\n]", body, maxsplit=1)[0].strip()
+                if sentence:
+                    body = sentence
+                if len(body) > 60:
+                    body = body[:60].rstrip() + "…"
+                rendered_core.append(
+                    f"- [{matched.group('topic')}] {matched.group('subject')} :: "
+                    f"{body}（更新 {matched.group('date')}）"
+                )
+            chunks.append("【长期记忆】\n" + "\n".join(rendered_core))
 
         # 跨 scope 共享：只取能对上 QQ 的身份/称呼（各≤5），关系不限
         relevant = {str(sender)} | self._mentions(text)
@@ -1269,7 +1572,7 @@ class Memory5(Star):
         for other in set(self.scopes):
             if other == scope:
                 continue
-            for line in self._core_text(other).splitlines():
+            for line in self._snapshot_core(other).splitlines():
                 matched = CORE_LINE_RE.match(line.strip())
                 if not matched:
                     continue
@@ -1299,7 +1602,7 @@ class Memory5(Star):
 
         # 重要：匹配当前消息的条目全放（总量由预算兜底），已在长期记忆里的跳过
         important = read_jsonl(scope_paths(scope)["important"])
-        picked = [e for e in important if self._match(e, text, sender) and not is_dup(str(e.get("text", "")))]
+        picked = [e for e in important if self._match(e, text, sender, strict_topic=True) and not is_dup(str(e.get("text", "")))]
         important_cap = self._int_raw("important_max_chars", 0)
         if important_cap > 0:
             limited, used_chars = [], 0
@@ -1311,7 +1614,15 @@ class Memory5(Star):
                 used_chars += cost
             picked = limited
         if picked:
-            chunks.append("【重要】\n" + "\n".join(f"- {e['text']}" for e in picked))
+            rendered_important: list[str] = []
+            for entry in picked:
+                body = str(entry.get("text", ""))
+                if compact_memory and len(body) > 90:
+                    body = body[:90].rstrip() + "…"
+                rendered_important.append(
+                    f"- {entry.get('subject')} :: {entry.get('topic')}: {body}"
+                )
+            chunks.append("【重要】\n" + "\n".join(rendered_important))
 
         # 提醒：只在触发窗口前后注入，且每个 QQ 最多 5 条
         remind_by_qq: dict[str, list[str]] = {}
@@ -1386,6 +1697,10 @@ class Memory5(Star):
         def block_len() -> int:
             return len("\n\n".join(chunks))
 
+        over_budget = block_len() > self.budget
+        if over_budget and bool(self._get("budget_core_only", True)):
+            recent_chunk = ""
+
         idx = len(chunks) - 1
         while block_len() > self.budget and idx > 0:
             parts = chunks[idx].split("\n")
@@ -1414,17 +1729,20 @@ class Memory5(Star):
             parts_out.append(remind_chunk)
         return "\n\n".join(parts_out)
 
-    def _clean_pending_context(self, req) -> int:
+    def _clean_pending_context(self, req, allow_cleanup: bool = True) -> int:
         pending = getattr(self, "_pending_context_clean", None)
-        if not pending:
+        if not allow_cleanup or not pending:
             return 0
         contexts = getattr(req, "contexts", None)
         if not isinstance(contexts, list):
             return 0
+        prefix, _ = self._cache_protection()
+        recent_start = max(0, len(contexts) - 30)
         kept, removed = [], 0
-        for item in contexts:
+        for idx, item in enumerate(contexts):
             text = self._context_text(item) if isinstance(item, dict) else ""
-            if text and self._normalize_compare(self._normalize_time(text)) in pending:
+            if (idx >= prefix and idx < recent_start and text
+                    and self._normalize_compare(self._normalize_time(text)) in pending):
                 removed += 1
                 continue
             kept.append(item)
@@ -1434,16 +1752,119 @@ class Memory5(Star):
             logger.info(f"memory5: 归档过滤项同步清理上下文 {removed} 条")
         return removed
 
+    def _prune_artifacts(self, target_dir: str) -> None:
+        now = time.time()
+        if now - getattr(self, "_last_artifact_cleanup", 0.0) < 3600:
+            return
+        self._last_artifact_cleanup = now
+        max_days = max(1, self._int("artifact_retention_days", 30, 1))
+        max_files = max(10, self._int("artifact_max_files", 500, 10))
+        files = [os.path.join(target_dir, n) for n in os.listdir(target_dir)] if os.path.isdir(target_dir) else []
+        files = [(os.path.getmtime(p), p) for p in files if os.path.isfile(p)]
+        files.sort(reverse=True)
+        cutoff = now - max_days * 86400
+        for idx, (mtime, path) in enumerate(files):
+            if idx >= max_files or mtime < cutoff:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def _store_artifact(self, scope: str, content: str) -> str:
+        raw = content.encode("utf-8", "ignore")
+        digest = hashlib.sha1(raw).hexdigest()[:16]
+        safe_scope = re.sub(r"[^A-Za-z0-9_-]", "_", scope or "unknown")
+        target_dir = os.path.join(MEM_ROOT, "artifacts", safe_scope)
+        os.makedirs(target_dir, exist_ok=True)
+        self._prune_artifacts(target_dir)
+        path = os.path.join(target_dir, digest + ".m5a")
+        if not os.path.exists(path):
+            try:
+                blob = encrypt_bytes(raw)
+            except Exception:
+                blob = raw
+            with open(path, "wb") as f:
+                f.write(blob)
+        return digest
+
+    def _read_artifact(self, scope: str, artifact_id: str) -> str:
+        if not re.fullmatch(r"[0-9a-f]{16}", artifact_id or ""):
+            return ""
+        safe_scope = re.sub(r"[^A-Za-z0-9_-]", "_", scope or "unknown")
+        base = os.path.join(MEM_ROOT, "artifacts", safe_scope)
+        path = os.path.join(base, artifact_id + ".m5a")
+        if not os.path.exists(path):
+            path = os.path.join(base, artifact_id + ".txt")
+        if not os.path.exists(path):
+            return ""
+        with open(path, "rb") as f:
+            data = f.read()
+        try:
+            data = decrypt_bytes(data)
+        except Exception:
+            pass
+        return data.decode("utf-8", errors="ignore")[:20000]
+
+    @filter.llm_tool(name="read_memory_artifact")
+    async def read_memory_artifact(self, event: AstrMessageEvent, artifact_id: str):
+        """读取被上下文压缩归档的旧工具结果。仅在需要原始细节时调用。"""
+        scope = self.scope_of(event) or ""
+        content = self._read_artifact(scope, str(artifact_id or "").strip())
+        return content or "没有找到对应的工具结果归档。"
+
+    def _trim_tool_context(self, req, allow_cleanup: bool, scope: str = "") -> int:
+        """Emergency tool-loop trim, guarded by idle time and a stable prefix."""
+        if not allow_cleanup or not bool(self._get("tool_context_compress", True)):
+            return 0
+        contexts = getattr(req, "contexts", None)
+        if not isinstance(contexts, list):
+            return 0
+        trigger = max(10000, self._int("tool_context_trigger_chars", 60000, 10000))
+        total = sum(len(str(m.get("content", ""))) for m in contexts if isinstance(m, dict))
+        if total < trigger:
+            return 0
+        keep = max(1, self._int("tool_context_keep_results", 36, 1))
+        budget = max(4000, self._int("tool_context_max_chars", 36000, 4000))
+        prefix, _ = self._cache_protection()
+        indices = [i for i, m in enumerate(contexts)
+                   if isinstance(m, dict) and m.get("role") == "tool"]
+        candidates = [i for i in (indices[:-keep] if len(indices) > keep else [])
+                      if i >= prefix]
+        placeholder = str(self._get("tool_context_placeholder", "[工具结果已压缩]"))
+        used = sum(len(str(contexts[i].get("content", ""))) for i in indices)
+        changed = 0
+        for i in candidates:
+            if used <= budget:
+                break
+            msg = contexts[i]
+            content = msg.get("content")
+            if isinstance(content, str) and content != placeholder:
+                digest = self._store_artifact(scope, content) if scope else ""
+                pointer = f"[工具结果已归档:{digest}]" if digest else placeholder
+                used -= max(0, len(content) - len(pointer))
+                msg["content"] = pointer
+                changed += 1
+        if changed:
+            logger.info(f"memory5: tool context compressed {changed} old results (chars={used}/{budget})")
+        return changed
+
     @filter.on_llm_request()
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         try:
             scope = self.scope_of(event)
+            now = time.time()
+            _, guard = self._cache_protection()
+            previous = self._last_request_at.get(scope, 0) if scope else 0
+            allow_cleanup = not previous or now - previous >= guard * 60
+            if scope:
+                self._last_request_at[scope] = now
+            self._trim_tool_context(req, allow_cleanup, scope or "")
             cache_friendly = bool(self._get("cache_friendly", True))
             # Archive-triggered pending cleanup is the original behavior.
             # Only the low-density context cleanup has its own switch.
-            self._clean_pending_context(req)
-            if bool(self._get("low_context_clean", False)) and scope:
-                self._clean_context_low(req, scope)
+            self._clean_pending_context(req, allow_cleanup)
+            if bool(self._get("low_context_clean", True)) and scope:
+                self._clean_context_low(req, scope, allow_cleanup)
             if not self.enabled_inject:
                 return
             if not scope:
@@ -1451,26 +1872,37 @@ class Memory5(Star):
             block = self.build_block(scope, str(event.get_sender_id()), event.message_str or "")
             if not block:
                 return
+            tail_at = block.find("\n【近期】")
+            tail = ""
+            if tail_at >= 0:
+                tail = block[tail_at + 1:]
+                block = block[:tail_at]
             text = DEFAULT_HEADER + "\n" + block
+            full_text = text + ("\n\n" + tail if tail else "")
             prompt = getattr(req, "prompt", None)
             if cache_friendly and isinstance(prompt, str) and prompt.strip():
-                # Put memory immediately before the current user turn.  This
-                # keeps the historical prefix untouched while making the
-                # memory more salient than an appended afterthought.
+                # Stable memory stays before the current turn; retrieved
+                # recent/random entries are appended after the question.
                 req.prompt = text + "\n\n" + prompt.lstrip()
+                if tail:
+                    part = _temporary_text_part(tail)
+                    if part is not None:
+                        req.extra_user_content_parts.append(part)
+                    else:
+                        req.prompt += "\n\n" + tail
                 return
-            part = _temporary_text_part(text)
+            part = _temporary_text_part(full_text)
             if part is not None:
                 req.extra_user_content_parts.append(part)
             else:
                 if isinstance(prompt, str) and prompt.strip():
-                    req.prompt = prompt.rstrip() + "\n\n" + text
+                    req.prompt = prompt.rstrip() + "\n\n" + full_text
                 else:
                     parts = getattr(req, "extra_user_content_parts", None)
                     if isinstance(parts, list):
-                        parts.append({"type": "text", "text": text})
+                        parts.append({"type": "text", "text": full_text})
                     else:
-                        req.system_prompt = (req.system_prompt or "") + "\n\n" + text
+                        req.system_prompt = (req.system_prompt or "") + "\n\n" + full_text
         except Exception as exc:  # 记忆出错不影响对话
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
 
@@ -1566,9 +1998,9 @@ class Memory5(Star):
         if not self._should_filter_density():
             return rows, 0
         try:
-            min_units = max(1, min(int(self._get("low_density_min_chars", 4)), 20))
+            min_units = max(1, min(int(self._get("low_density_min_chars", 3)), 20))
         except (TypeError, ValueError):
-            min_units = 4
+            min_units = 3
         keep_words = ("提醒", "记得", "别忘", "地址", "电话", "医院", "药", "钱",
                       "生日", "喜欢", "讨厌", "几点", "日期", "考试", "作业", "上班",
                       "发烧", "难受", "不舒服", "见面", "身份证", "医保", "对象",

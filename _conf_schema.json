@@ -139,9 +139,9 @@
       },
       "low_density_min_chars": {
         "description": "低密度判定单位",
-        "hint": "中文按字、英文按词、数字按段计数；少于该值且与前后文无关联的消息会被过滤，默认 4",
+        "hint": "中文按字、英文按词、数字按段计数；少于该值且与前后文无关联的消息会被过滤，默认 3",
         "type": "int",
-        "default": 4
+        "default": 3
       },
       "filter_low_density_night_only": {
         "description": "仅在凌晨归档过滤",
@@ -165,7 +165,7 @@
             "description": "总预算（字符）",
             "hint": "长期、共享与重要记忆的合计上限，超出时按 重要 → 共享 → 长期 的顺序裁剪。",
             "type": "int",
-            "default": 3600
+            "default": 4800
           }
         }
       },
@@ -176,9 +176,9 @@
         "items": {
           "core_max_chars": {
             "description": "长期记忆上限（字符）",
-            "hint": "超出后按时间顺序丢弃最旧条目。",
+            "hint": "长期记忆上限；默认 3000，长事实多时可调到 3500–4000。",
             "type": "int",
-            "default": 2000
+            "default": 3000
           },
           "random_min": {
             "description": "随机注入条数（条）",
@@ -231,6 +231,45 @@
             "default": 1200
           }
         }
+      },
+      "compact_memory": {
+        "description": "长期/重要记忆摘要注入",
+        "hint": "长期只常驻标题和短摘要，重要按关键词带摘要；用户问具体内容时展开全文。",
+        "type": "bool",
+        "default": true
+      },
+      "budget_core_only": {
+        "description": "超预算只保留长期/重要",
+        "hint": "超过总预算时不再注入普通/随机近期记忆；提醒仍保留。",
+        "type": "bool",
+        "default": true
+      },
+      "tool_context_compress": {
+        "description": "工具循环上下文压缩",
+        "type": "bool",
+        "default": true
+      },
+      "tool_context_trigger_chars": {
+        "description": "工具上下文触发字符数",
+        "type": "int",
+        "default": 60000
+      },
+      "tool_context_keep_results": {
+        "description": "保留最近工具结果数",
+        "type": "int",
+        "default": 36,
+        "hint": "最近工具结果至少保留条数；默认 36。是否压缩还受 tool_context_max_chars 预算控制。"
+      },
+      "tool_context_placeholder": {
+        "description": "旧工具结果占位符",
+        "type": "string",
+        "default": "[工具结果已压缩]"
+      },
+      "tool_context_max_chars": {
+        "description": "工具结果总字符预算",
+        "hint": "只压缩前缀/最近结果之外的旧工具结果，直到工具结果总量回到该预算；默认 36000。",
+        "type": "int",
+        "default": 36000
       }
     }
   },
@@ -271,9 +310,9 @@
       },
       "low_context_clean": {
         "description": "额外清理原始对话上下文",
-        "hint": "默认关闭。开启后会清理 AstrBot 原始对话上下文中的低密度/无效内容；这是独立的旧清理开关，不会删除日记",
+        "hint": "默认开启：归档前清理原始对话里的低密度内容；清理受低密度规则约束，不是删除全部短句。",
         "type": "bool",
-        "default": false
+        "default": true
       }
     }
   },
@@ -604,6 +643,117 @@
           "第 3 步：执行重置"
         ],
         "default": "不重置"
+      }
+    }
+  },
+  "gate": {
+    "description": "浅层判读门",
+    "hint": "纯规则读空气：@/名字/回复/命令直接放行；其他 @、填充词跳过。",
+    "type": "object",
+    "items": {
+      "gate_enabled": {
+        "description": "启用浅层判读门",
+        "type": "bool",
+        "default": true,
+        "hint": "纯规则读空气：@/名字/回复/命令直接放行；其他 @、填充词跳过；"
+      },
+      "gate_debounce_ms": {
+        "description": "消息防抖毫秒",
+        "type": "int",
+        "default": 700
+      },
+      "gate_names": {
+        "description": "名字触发词",
+        "type": "list",
+        "default": [
+          "鱼鱼",
+          "大肥鱼",
+          "小鲸鱼",
+          "D指导",
+          "D老师",
+          "深度求索",
+          "DeepSeek 娘",
+          "鲸鱼娘",
+          "白饭",
+          "鲸鲸"
+        ]
+      },
+      "gate_attention_decay_seconds": {
+        "description": "注意力衰减秒数",
+        "type": "int",
+        "default": 600
+      },
+      "gate_attention_threshold": {
+        "description": "注意力加成阈值",
+        "type": "float",
+        "default": 2.0
+      },
+      "cold_cache_seconds": {
+        "description": "冷群缓存有效秒数",
+        "type": "int",
+        "default": 900
+      },
+      "cold_cache_max_messages": {
+        "description": "冷群缓存消息上限",
+        "type": "int",
+        "default": 20
+      },
+      "gate_random_reply_enabled": {
+        "description": "低频随机回复",
+        "hint": "默认关闭；开启后普通群聊有概率进入主模型。请关闭 AstrBot 自带的概率回复，避免双重触发。",
+        "type": "bool",
+        "default": false
+      },
+      "gate_random_reply_probability": {
+        "description": "随机回复概率",
+        "hint": "0–1，默认 0.02；建议低频，按群活跃度调整。",
+        "type": "float",
+        "default": 0.02
+      },
+      "gate_ambient_reply_probability": {
+        "description": "相关话题主动回复概率",
+        "hint": "没有叫名字时，相关提问/图片获得主动请求的概率；默认 0.15。",
+        "type": "float",
+        "default": 0.15
+      },
+      "gate_ambient_cooldown_seconds": {
+        "description": "主动回复冷却秒数",
+        "hint": "两次主动请求之间的最小间隔；默认 90 秒。",
+        "type": "int",
+        "default": 90
+      }
+    }
+  },
+  "cache": {
+    "description": "缓存保护",
+    "hint": "鱼鱼日记自己的缓存守卫；由鱼鱼日记自身维护。",
+    "type": "object",
+    "items": {
+      "cache_guard_minutes": {
+        "description": "活跃保护分钟数",
+        "type": "int",
+        "default": 120,
+        "hint": "活跃保护分钟数；默认 120，长度仍有阈值兜底。"
+      },
+      "cache_prefix_messages": {
+        "description": "保护前缀消息数",
+        "type": "int",
+        "default": 105
+      },
+      "index_snapshot_ttl_seconds": {
+        "description": "索引快照刷新秒数",
+        "type": "int",
+        "default": 10800
+      },
+      "artifact_retention_days": {
+        "description": "工具归档保留天数",
+        "type": "int",
+        "default": 30
+      },
+      "artifact_max_files": {
+        "description": "工具归档最大文件数",
+        "type": "int",
+        "default": 500
       }
     }
   }

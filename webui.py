@@ -255,7 +255,7 @@ class _TasksMixin:
                         f"超过 {repeat_limit}MB 的媒体只能连续发送 1~7 天，请把连续天数改成 1~7"
                     )
         if kind == "daily" and not date:
-            date = __import__("time").strftime("%Y-%m-%d")
+            date = time.strftime("%Y-%m-%d")
         tasks = self.plugin.load_tasks()
         task_id = str(body.get("id", "")).strip()
         text_limit = self.plugin._int_raw("text_total_mb", 10)

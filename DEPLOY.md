@@ -84,3 +84,17 @@ Linux 下权限设 600。
 ## 八、依赖
 
 插件不额外安装 Python 包，使用 AstrBot 自带的 `cryptography`。
+
+## 九、缓存与工具归档
+
+- 空闲保护默认 120 分钟，前缀保护默认 105 条。
+- 工具结果压缩后保存为加密 `.m5a` artifact，默认保留 30 天、最多 500 个。
+- 工具 artifact 位于：
+
+```text
+<AstrBot数据目录>/plugin_data/astrbot_plugin_memory5/artifacts/
+```
+
+- 图片短描述由 `astrbot_plugin_context_hygiene` 负责；未安装时鱼鱼日记仍可独立运行。
+- HTTP 图片下载和描述失败时保留原图，不会强制移除。
+
