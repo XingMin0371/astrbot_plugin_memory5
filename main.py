@@ -1255,20 +1255,29 @@ class Memory5(Star):
                 # continuation bonus, but never enough to override @/name.
                 now = time.time()
                 decay = max(30, self._int("gate_attention_decay_seconds", 600, 30))
+                threshold = self._float_cfg("gate_attention_threshold", 2.0)
                 state = self._attention.setdefault(scope, {})
                 old_last, old_value = state.get(sender, (0.0, 0.0))
                 attention = old_value * math.exp(-max(0.0, now - old_last) / decay)
-                if attention >= self._float_cfg("gate_attention_threshold", 2.0):
+                attention_hit = (attention >= threshold
+                                 and bool(self._get("gate_attention_reply_enabled", True)))
+                if attention_hit:
                     score += 1
                 state[sender] = (now, min(10.0, attention + (2.0 if score > 0 else 0.4)))
 
+                cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 90, 0))
+                cooldown_ok = now - self._ambient_last.get(scope, 0) >= cooldown
+
                 if score <= 0:
+                    if attention_hit and cooldown_ok:
+                        self._ambient_last[scope] = now
+                        event.message_str = self._promote_cold(scope, text)
+                        event.should_call_llm(False)
+                        yield await self._ambient_request(event, event.message_str)
+                        return
                     ambient = bool(self._get("gate_random_reply_enabled", False))
                     probability = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
-                    cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 90, 0))
-                    now = time.time()
-                    if (ambient and random.random() < probability
-                            and now - self._ambient_last.get(scope, 0) >= cooldown):
+                    if (ambient and random.random() < probability and cooldown_ok):
                         self._ambient_last[scope] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
@@ -1276,17 +1285,19 @@ class Memory5(Star):
                         return
                     self._remember_cold(scope, text)
                     event.should_call_llm(False)
-                    self._gate_recent[scope].append(text)
                     return
                 else:
-                    # Related questions get a low-frequency ambient chance;
-                    # unrelated messages still leave the default pipeline intact.
+                    # Attention can proactively interject; related questions
+                    # still use the lower-frequency ambient probability.
+                    if attention_hit and cooldown_ok:
+                        self._ambient_last[scope] = now
+                        event.message_str = self._promote_cold(scope, text)
+                        event.should_call_llm(False)
+                        yield await self._ambient_request(event, event.message_str)
+                        return
                     related = score >= 2
                     probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
-                    cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 90, 0))
-                    now = time.time()
-                    if (related and random.random() < probability
-                            and now - self._ambient_last.get(scope, 0) >= cooldown):
+                    if (related and random.random() < probability and cooldown_ok):
                         self._ambient_last[scope] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
@@ -1294,7 +1305,6 @@ class Memory5(Star):
                         return
                     event.message_str = self._promote_cold(scope, text)
                     return
-            self._gate_recent[scope].append(text)
         except Exception as exc:  # gate failure must fail open
             logger.debug(f"memory5: gate skipped ({type(exc).__name__}: {exc})")
 

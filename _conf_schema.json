@@ -681,12 +681,14 @@
       "gate_attention_decay_seconds": {
         "description": "注意力衰减秒数",
         "type": "int",
-        "default": 600
+        "default": 600,
+        "hint": "注意力衰减秒数；越大，近期互动记得越久；默认 600。"
       },
       "gate_attention_threshold": {
         "description": "注意力加成阈值",
         "type": "float",
-        "default": 2.0
+        "default": 2.0,
+        "hint": "累计注意力达到该值后允许主动接话；默认 2.0。"
       },
       "cold_cache_seconds": {
         "description": "冷群缓存有效秒数",
@@ -721,6 +723,12 @@
         "hint": "两次主动请求之间的最小间隔；默认 90 秒。",
         "type": "int",
         "default": 90
+      },
+      "gate_attention_reply_enabled": {
+        "description": "注意力机制主动回复",
+        "hint": "默认开启；高注意力发送者可在没有叫名字时主动接话，仍受冷却限制。",
+        "type": "bool",
+        "default": true
       }
     }
   },
