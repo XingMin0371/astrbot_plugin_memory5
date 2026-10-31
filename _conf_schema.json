@@ -687,8 +687,8 @@
       "gate_attention_threshold": {
         "description": "注意力加成阈值",
         "type": "float",
-        "default": 2.0,
-        "hint": "累计注意力达到该值后允许主动接话；默认 2.0。"
+        "default": 4.0,
+        "hint": "累计注意力达到该值后允许主动接话；默认 4.0，约等于 3 条相关消息或 10 条普通闲聊。"
       },
       "cold_cache_seconds": {
         "description": "冷群缓存有效秒数",

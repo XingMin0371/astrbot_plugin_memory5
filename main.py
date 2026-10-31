@@ -1255,7 +1255,7 @@ class Memory5(Star):
                 # continuation bonus, but never enough to override @/name.
                 now = time.time()
                 decay = max(30, self._int("gate_attention_decay_seconds", 600, 30))
-                threshold = self._float_cfg("gate_attention_threshold", 2.0)
+                threshold = self._float_cfg("gate_attention_threshold", 4.0)
                 state = self._attention.setdefault(scope, {})
                 old_last, old_value = state.get(sender, (0.0, 0.0))
                 attention = old_value * math.exp(-max(0.0, now - old_last) / decay)
