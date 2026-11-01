@@ -1678,6 +1678,34 @@ class Memory5(Star):
             f"本条引用：{reply_text}"
         )
 
+    @staticmethod
+    def _core_summary(body: str, core_len: int = 0, core_max: int = 0) -> str:
+        """Adaptive 65–75 chars; keeps a bit more when content needs it."""
+        parts = re.split(r"[。！？!?\n]", body, maxsplit=1)
+        first = parts[0].strip()
+        rest = parts[1].strip() if len(parts) > 1 else ""
+        if not first:
+            return body.strip()
+        limit = 65
+        qq_count = len(set(re.findall(r"(?<!\d)\d{5,12}(?!\d)", body)))
+        qualifier = bool(re.search(
+            r"因为|所以|但是|如果|除非|只有|必须|不能|前提|条件|除了|同时|另外|需要",
+            body,
+        ))
+        if qq_count >= 2:
+            limit = 75
+        elif qualifier or rest:
+            limit = 70
+        if core_max > 0 and core_len < core_max * 0.75:
+            limit = max(limit, 70)
+        if rest and len(first) < limit:
+            second = re.split(r"[。！？!?\n]", rest, maxsplit=1)[0].strip()
+            if second:
+                first = first + "。" + second
+        if len(first) > limit:
+            first = first[:max(1, limit - 1)].rstrip() + "…"
+        return first
+
     def build_block(self, scope: str, sender: str, text: str) -> str:
         chunks: list[str] = []
         seen: list[str] = []
@@ -1708,12 +1736,9 @@ class Memory5(Star):
                 if not matched or not compact_memory or matched.group("topic") in PERSONA_TOPICS:
                     rendered_core.append(line)
                     continue
-                body = matched.group("text")
-                sentence = re.split(r"[。！？!?\n]", body, maxsplit=1)[0].strip()
-                if sentence:
-                    body = sentence
-                if len(body) > 65:
-                    body = body[:65].rstrip() + "…"
+                body = self._core_summary(
+                    matched.group("text"), len(core), self.keep_core
+                )
                 rendered_core.append(
                     f"- [{matched.group('topic')}] {matched.group('subject')} :: "
                     f"{body}（更新 {matched.group('date')}）"
