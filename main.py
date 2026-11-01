@@ -2134,7 +2134,6 @@ class Memory5(Star):
             tail = (tail + "\n\n" + meta) if tail else meta
             text = DEFAULT_HEADER + "\n" + block
             full_text = text + ("\n\n" + tail if tail else "")
-            prompt = getattr(req, "prompt", None)
             if cache_friendly and isinstance(prompt, str) and prompt.strip():
                 # Stable memory stays before the current turn; retrieved
                 # recent/random entries are appended after the question.
