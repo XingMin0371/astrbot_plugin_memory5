@@ -195,21 +195,21 @@
         "items": {
           "identity_max": {
             "description": "共享身份条数（条）",
-            "hint": "每个 QQ 最多注入的身份信息条数；默认 4。",
+            "hint": "本次注入最多几条身份记忆；默认 4。",
             "type": "int",
             "default": 4
           },
           "callname_max": {
             "description": "共享称呼条数（条）",
-            "hint": "每个 QQ 最多注入的称呼条数；默认 4。",
+            "hint": "本次注入最多几条称呼记忆；默认 4。",
             "type": "int",
             "default": 4
           },
           "shared_relation_max_chars": {
             "description": "共享关系上限（字符）",
-            "hint": "关系类共享记忆字符上限；默认 640，按 4 身份 + 4 称呼对应的 8 条量级预留。",
+            "hint": "关系类共享记忆的总字符上限；默认 500，约按 5 条、每条 100 字符预留。",
             "type": "int",
-            "default": 640
+            "default": 500
           }
         }
       },
