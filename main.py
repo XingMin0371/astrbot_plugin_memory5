@@ -1744,7 +1744,7 @@ class Memory5(Star):
                 elif topic == "关系":
                     shared_relation.append(line)
         shared = shared_identity[: self._int("identity_max", 4)] + shared_callname[: self._int("callname_max", 4)]
-        relation_budget = self._int("shared_relation_max_chars", 1000)
+        relation_budget = self._int("shared_relation_max_chars", 640)
         relation_lines: list[str] = []
         used_chars = 0
         for line in shared_relation:

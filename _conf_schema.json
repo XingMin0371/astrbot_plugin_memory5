@@ -207,9 +207,9 @@
           },
           "shared_relation_max_chars": {
             "description": "共享关系上限（字符）",
-            "hint": "关系类共享记忆字符上限；默认 1000。",
+            "hint": "关系类共享记忆字符上限；默认 640，按 4 身份 + 4 称呼对应的 8 条量级预留。",
             "type": "int",
-            "default": 1000
+            "default": 640
           }
         }
       },
