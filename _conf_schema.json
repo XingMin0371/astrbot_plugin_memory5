@@ -209,7 +209,13 @@
         "description": "保留最近工具结果数",
         "type": "int",
         "default": 25,
-        "hint": "最近 3 条优先保护；仅当其总量达到预算 2.05 倍时才压缩。默认 25 条用于小调用兜底，预算不足时会继续压缩更早的结果。"
+        "hint": "活跃时最近 25 条软保护；空闲清理时只保留最近 15 条。最近 3 条优先保护，达到预算 2.05 倍才会压缩。"
+      },
+      "tool_context_idle_keep_results": {
+        "description": "空闲清理保留工具结果数",
+        "hint": "空闲清理模式下至少保留最近多少条工具结果；默认 15，最近 3 条仍优先保护。",
+        "type": "int",
+        "default": 15
       },
       "tool_context_max_chars": {
         "description": "工具结果总字符预算",
@@ -662,8 +668,8 @@
       "cache_guard_minutes": {
         "description": "活跃保护分钟数",
         "type": "int",
-        "default": 120,
-        "hint": "活跃保护分钟数；默认 120，长度仍有阈值兜底。"
+        "default": 75,
+        "hint": "最近 N 分钟内有请求时跳过旧上下文清理和工具清理；默认 75。中等群建议 75，缓存优先可用 90。"
       },
       "cache_prefix_messages": {
         "description": "保护前缀消息数",

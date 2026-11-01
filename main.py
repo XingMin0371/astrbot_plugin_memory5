@@ -192,7 +192,7 @@ def _temporary_text_part(text: str):
 DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
 TZ = timezone(timedelta(hours=8))
 # Internal cache protection; intentionally not exposed as separate settings.
-CACHE_GUARD_MINUTES = 120
+CACHE_GUARD_MINUTES = 75
 CACHE_PREFIX_MESSAGES = 65
 PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
 
@@ -2092,6 +2092,8 @@ class Memory5(Star):
         if total < trigger and not emergency:
             return 0
         keep = max(3, self._int("tool_context_keep_results", 25, 1))
+        if allow_cleanup:
+            keep = max(3, self._int("tool_context_idle_keep_results", 15, 1))
         prefix, _ = self._cache_protection()
         old = indices[:-keep]
         soft = indices[-keep:-3]
