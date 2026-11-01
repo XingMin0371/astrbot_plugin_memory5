@@ -163,9 +163,9 @@
         "items": {
           "inject_budget_chars": {
             "description": "总预算（字符）",
-            "hint": "长期、共享与重要记忆的合计上限，超出时按 重要 → 共享 → 长期 的顺序裁剪。",
+            "hint": "长期、共享与重要记忆的合计上限；默认 4600，缓存优先时不要低于 4000。",
             "type": "int",
-            "default": 4800
+            "default": 4600
           }
         }
       },
@@ -176,9 +176,9 @@
         "items": {
           "core_max_chars": {
             "description": "长期记忆上限（字符）",
-            "hint": "长期记忆上限；默认 3000，长事实多时可调到 3500–4000。",
+            "hint": "长期记忆上限；默认 2800，缓存优先时保持稳定，不要频繁改。",
             "type": "int",
-            "default": 3000
+            "default": 2800
           },
           "important_max_chars": {
             "description": "重要上限（字符）",
@@ -207,9 +207,9 @@
           },
           "shared_relation_max_chars": {
             "description": "共享关系上限（字符）",
-            "hint": "关系类共享记忆的字符上限。",
+            "hint": "关系类共享记忆字符上限；默认 1000，约可容纳 8 条。",
             "type": "int",
-            "default": 600
+            "default": 1000
           }
         }
       },
@@ -442,9 +442,9 @@
           },
           "remind_max_per_qq": {
             "description": "每 QQ 注入条数（条）",
-            "hint": "每个 QQ 同时注入的提醒上限。",
+            "hint": "每个 QQ 同时注入的提醒上限；默认 4。",
             "type": "int",
-            "default": 5
+            "default": 4
           }
         }
       },

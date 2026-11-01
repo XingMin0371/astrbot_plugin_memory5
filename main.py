@@ -1035,11 +1035,11 @@ class Memory5(Star):
 
     @property
     def keep_core(self) -> int:
-        return self._int("core_max_chars", 3000, 300)
+        return self._int("core_max_chars", 2800, 300)
 
     @property
     def budget(self) -> int:
-        return self._int("inject_budget_chars", 4800, 300)
+        return self._int("inject_budget_chars", 4600, 300)
 
     @property
     def normal_budget(self) -> int:
@@ -1744,7 +1744,7 @@ class Memory5(Star):
                 elif topic == "关系":
                     shared_relation.append(line)
         shared = shared_identity[: self._int("identity_max", 5)] + shared_callname[: self._int("callname_max", 5)]
-        relation_budget = self._int("shared_relation_max_chars", 600)
+        relation_budget = self._int("shared_relation_max_chars", 1000)
         relation_lines: list[str] = []
         used_chars = 0
         for line in shared_relation:
@@ -1797,7 +1797,7 @@ class Memory5(Star):
         # 提醒：只按条数限制（每个 QQ 最多 N 条），不再做字符预算
         remind_chunk = ""
         if remind_by_qq:
-            per_qq = self._int("remind_max_per_qq", 5)
+            per_qq = self._int("remind_max_per_qq", 4)
             picked_lines: list[str] = []
             for qq, items in remind_by_qq.items():
                 picked_lines.extend(items[:per_qq])
