@@ -2085,7 +2085,7 @@ class Memory5(Star):
         recent = indices[-3:]
         recent_used = sum(len(str(contexts[i].get("content", ""))) for i in recent)
         recent_limit = budget * 2.05
-        emergency_threshold = min(budget * 2.5, trigger * 1.5)
+        emergency_threshold = max(budget * 2.5, trigger * 1.5)
         emergency = total >= emergency_threshold or recent_used >= recent_limit
         if not (allow_cleanup or emergency):
             return 0
