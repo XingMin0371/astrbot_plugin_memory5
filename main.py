@@ -1697,7 +1697,7 @@ class Memory5(Star):
         elif qualifier or rest:
             limit = 70
         if core_max > 0 and core_len < core_max * 0.75:
-            limit = max(limit, 70)
+            limit = max(limit, 75)
         if rest and len(first) < limit:
             second = re.split(r"[。！？!?\n]", rest, maxsplit=1)[0].strip()
             if second:
