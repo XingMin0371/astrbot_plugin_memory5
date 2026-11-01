@@ -760,7 +760,7 @@
         "description": "工具归档最大文件数",
         "type": "int",
         "default": 400,
-        "hint": "工具 artifact 每个 scope 最多保留文件数；默认 400，足够覆盖 1000 条/天群的前一天记录。"
+        "hint": "工具 artifact 每个 scope 最多保留文件数；默认 400。"
       }
     }
   }
