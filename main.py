@@ -1080,7 +1080,7 @@ class Memory5(Star):
 
     # --------------------------------------------------------- light gate
     def _gate_names(self) -> list[str]:
-        raw = self._get("gate_names", ["鱼鱼", "小鲸鱼", "D指导", "鲸鲸"])
+        raw = self._get("gate_names", ["鱼鱼"])
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         return [str(x) for x in raw]

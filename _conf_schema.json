@@ -672,16 +672,7 @@
         "description": "名字触发词",
         "type": "list",
         "default": [
-          "鱼鱼",
-          "大肥鱼",
-          "小鲸鱼",
-          "D指导",
-          "D老师",
-          "深度求索",
-          "DeepSeek 娘",
-          "鲸鱼娘",
-          "白饭",
-          "鲸鲸"
+          "鱼鱼"
         ]
       },
       "gate_attention_decay_seconds": {
