@@ -2084,15 +2084,19 @@ class Memory5(Star):
         used = sum(len(str(contexts[i].get("content", ""))) for i in indices)
         recent = indices[-3:]
         recent_used = sum(len(str(contexts[i].get("content", ""))) for i in recent)
-        emergency = total >= trigger * 2.5 or recent_used >= budget * 2.5
-        if not (allow_cleanup or emergency) or total < trigger:
+        recent_limit = budget * 2.05
+        emergency_threshold = min(budget * 2.5, trigger * 1.5)
+        emergency = total >= emergency_threshold or recent_used >= recent_limit
+        if not (allow_cleanup or emergency):
+            return 0
+        if total < trigger and not emergency:
             return 0
         keep = max(3, self._int("tool_context_keep_results", 25, 1))
         prefix, _ = self._cache_protection()
         old = indices[:-keep]
         soft = indices[-keep:-3]
         candidates = [i for i in old + soft if i >= prefix]
-        if recent_used >= budget * 2.5:
+        if recent_used >= recent_limit:
             candidates += [i for i in recent if i >= prefix]
         placeholder = str(self._get("tool_context_placeholder", "[工具结果已压缩]"))
         changed = 0
