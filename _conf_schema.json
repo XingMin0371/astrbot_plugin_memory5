@@ -258,13 +258,13 @@
       "tool_context_trigger_chars": {
         "description": "工具上下文触发字符数",
         "type": "int",
-        "default": 60000
+        "default": 48000
       },
       "tool_context_keep_results": {
         "description": "保留最近工具结果数",
         "type": "int",
-        "default": 36,
-        "hint": "最近工具结果至少保留条数；默认 36。是否压缩还受 tool_context_max_chars 预算控制。"
+        "default": 25,
+        "hint": "最近工具结果至少保留条数；默认 25。是否压缩还受 tool_context_max_chars 预算控制。"
       },
       "tool_context_placeholder": {
         "description": "旧工具结果占位符",
@@ -273,9 +273,9 @@
       },
       "tool_context_max_chars": {
         "description": "工具结果总字符预算",
-        "hint": "只压缩前缀/最近结果之外的旧工具结果，直到工具结果总量回到该预算；默认 36000。",
+        "hint": "只压缩前缀/最近结果之外的旧工具结果，直到工具结果总量回到该预算；默认 24000。",
         "type": "int",
-        "default": 36000
+        "default": 24000
       }
     }
   },
