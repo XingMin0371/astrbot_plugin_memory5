@@ -193,7 +193,7 @@ DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
 TZ = timezone(timedelta(hours=8))
 # Internal cache protection; intentionally not exposed as separate settings.
 CACHE_GUARD_MINUTES = 120
-CACHE_PREFIX_MESSAGES = 105
+CACHE_PREFIX_MESSAGES = 65
 PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
 
 
