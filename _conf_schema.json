@@ -505,28 +505,6 @@
           "鱼鱼"
         ]
       },
-      "gate_attention_decay_seconds": {
-        "description": "注意力衰减秒数",
-        "type": "int",
-        "default": 360,
-        "hint": "注意力衰减秒数；默认 360（6 分钟），兼顾活跃段连续性和话题切换。"
-      },
-      "gate_attention_threshold": {
-        "description": "注意力加成阈值",
-        "type": "float",
-        "default": 4.6,
-        "hint": "累计注意力达到该值后允许主动接话；默认 4.6，可由 2.0+1.3+1.3、2.0+1.3+0.7+0.2×3 等组合达到。增量：闲聊 +0.2，弱相关 +0.7，相关 +1.3，强相关 +2.0。"
-      },
-      "cold_cache_seconds": {
-        "description": "冷群缓存有效秒数",
-        "type": "int",
-        "default": 900
-      },
-      "cold_cache_max_messages": {
-        "description": "冷群缓存消息上限",
-        "type": "int",
-        "default": 20
-      },
       "gate_random_reply_enabled": {
         "description": "低频随机回复",
         "hint": "默认关闭；开启后普通群聊有概率进入主模型。请关闭 AstrBot 自带的概率回复，避免双重触发。",
@@ -556,6 +534,28 @@
         "hint": "默认开启；高注意力发送者可在没有叫名字时主动接话，仍受冷却限制。",
         "type": "bool",
         "default": true
+      },
+      "gate_attention_decay_seconds": {
+        "description": "注意力衰减秒数",
+        "type": "int",
+        "default": 360,
+        "hint": "注意力衰减秒数；默认 360（6 分钟），兼顾活跃段连续性和话题切换。"
+      },
+      "gate_attention_threshold": {
+        "description": "注意力加成阈值",
+        "type": "float",
+        "default": 4.6,
+        "hint": "累计注意力达到该值后允许主动接话；默认 4.6，可由 2.0+1.3+1.3、2.0+1.3+0.7+0.2×3 等组合达到。增量：闲聊 +0.2，弱相关 +0.7，相关 +1.3，强相关 +2.0。"
+      },
+      "cold_cache_seconds": {
+        "description": "冷群缓存有效秒数",
+        "type": "int",
+        "default": 900
+      },
+      "cold_cache_max_messages": {
+        "description": "冷群缓存消息上限",
+        "type": "int",
+        "default": 20
       }
     }
   },
