@@ -2080,7 +2080,7 @@ class Memory5(Star):
         total = sum(len(str(m.get("content", ""))) for m in contexts if isinstance(m, dict))
         if total < trigger:
             return 0
-        keep = max(1, self._int("tool_context_keep_results", 25, 1))
+        keep = max(3, self._int("tool_context_keep_results", 25, 1))
         budget = max(4000, self._int("tool_context_max_chars", 24000, 4000))
         prefix, _ = self._cache_protection()
         indices = [i for i, m in enumerate(contexts)

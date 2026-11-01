@@ -1,4 +1,60 @@
 {
+  "basic": {
+    "description": "基础",
+    "hint": "总开关、归档、注入。",
+    "type": "object",
+    "items": {
+      "enable": {
+        "description": "总开关",
+        "hint": "关闭后停止采集、归档与注入。",
+        "type": "bool",
+        "default": true
+      },
+      "enable_archive": {
+        "description": "自动归档",
+        "hint": "按归档时间整理聊天记录；关闭后仅使用已有日记。",
+        "type": "bool",
+        "default": true
+      },
+      "enable_inject": {
+        "description": "注入记忆",
+        "hint": "对话时将相关日记注入上下文；关闭后模型无法读取记忆。",
+        "type": "bool",
+        "default": true
+      },
+      "archive_on_start": {
+        "description": "插件重启自动归档",
+        "hint": "默认关闭：启动时不追赶归档；开启后启动约 30 秒归档一次，间隔超过 6 小时也会追赶。",
+        "type": "bool",
+        "default": false
+      },
+      "archive_now": {
+        "description": "立即归档一次",
+        "hint": "立即执行一次归档，完成后自动取消勾选。",
+        "type": "bool",
+        "default": false
+      },
+      "timezone": {
+        "description": "时区",
+        "hint": "一个国家只保留一个代表时区；中国用北京时间 UTC+8。修改后需重启/重载插件",
+        "type": "string",
+        "options": [
+          "北京时间（Asia/Shanghai）",
+          "东京（Asia/Tokyo）",
+          "UTC",
+          "伦敦（Europe/London）",
+          "纽约（America/New_York）"
+        ],
+        "default": "北京时间（Asia/Shanghai）"
+      },
+      "cache_friendly": {
+        "description": "缓存友好注入",
+        "hint": "默认开启：不改写历史前缀，把记忆放在当前用户消息前部，尽量保留上游 Prompt Cache，并提高记忆显著性。",
+        "type": "bool",
+        "default": true
+      }
+    }
+  },
   "permission": {
     "description": "权限",
     "hint": "谁可以管理，谁的消息不记。",
@@ -37,117 +93,6 @@
         "hint": "该名单内账号的消息不会被记录。",
         "type": "list",
         "default": []
-      }
-    }
-  },
-  "basic": {
-    "description": "基础",
-    "hint": "总开关、归档、注入。",
-    "type": "object",
-    "items": {
-      "enable": {
-        "description": "总开关",
-        "hint": "关闭后停止采集、归档与注入。",
-        "type": "bool",
-        "default": true
-      },
-      "enable_archive": {
-        "description": "自动归档",
-        "hint": "按归档时间整理聊天记录；关闭后仅使用已有日记。",
-        "type": "bool",
-        "default": true
-      },
-      "enable_inject": {
-        "description": "注入记忆",
-        "hint": "对话时将相关日记注入上下文；关闭后模型无法读取记忆。",
-        "type": "bool",
-        "default": true
-      },
-      "cache_friendly": {
-        "description": "缓存友好注入",
-        "hint": "默认开启：不改写历史前缀，把记忆放在当前用户消息前部，尽量保留上游 Prompt Cache，并提高记忆显著性。",
-        "type": "bool",
-        "default": true
-      },
-      "archive_now": {
-        "description": "立即归档一次",
-        "hint": "立即执行一次归档，完成后自动取消勾选。",
-        "type": "bool",
-        "default": false
-      },
-      "archive_on_start": {
-        "description": "插件重启自动归档",
-        "hint": "默认关闭：启动时不追赶归档；开启后启动约 30 秒归档一次，间隔超过 6 小时也会追赶。",
-        "type": "bool",
-        "default": false
-      },
-      "timezone": {
-        "description": "时区",
-        "hint": "一个国家只保留一个代表时区；中国用北京时间 UTC+8。修改后需重启/重载插件",
-        "type": "string",
-        "options": [
-          "北京时间（Asia/Shanghai）",
-          "东京（Asia/Tokyo）",
-          "UTC",
-          "伦敦（Europe/London）",
-          "纽约（America/New_York）"
-        ],
-        "default": "北京时间（Asia/Shanghai）"
-      }
-    }
-  },
-  "archive": {
-    "description": "归档",
-    "hint": "什么时候整理、记录哪些会话、通知发到哪。",
-    "type": "object",
-    "items": {
-      "extract_times": {
-        "description": "归档时间",
-        "hint": "每日执行归档的时刻，24 小时制，多个时间以逗号分隔。",
-        "type": "string",
-        "default": "04:05,16:05"
-      },
-      "write_scopes": {
-        "description": "记录的会话",
-        "hint": "需要归档的会话，格式 group:群号 或 private:QQ号。",
-        "type": "list",
-        "default": []
-      },
-      "notify_scopes": {
-        "description": "归档通知发到",
-        "hint": "归档完成后向这些会话发送提示；不需要群通知时只保留私聊 scope。",
-        "type": "list",
-        "default": []
-      },
-      "notify_quiet_ranges": {
-        "description": "免打扰时段",
-        "hint": "该时段内不发送归档通知，多个时段以逗号分隔。",
-        "type": "string",
-        "default": "00:00-08:00,12:00-14:00"
-      },
-      "notify_max_per_day": {
-        "description": "通知上限（次）",
-        "hint": "每日最多发送的归档通知条数。",
-        "type": "int",
-        "default": 2
-      },
-      "filter_low_density": {
-        "description": "归档前过滤低密度消息",
-        "hint": "默认开启：归档压缩前丢弃复读、词汇重复、过短或与前后文无共同词的内容，节省 Token",
-        "type": "bool",
-        "default": true
-      },
-      "low_density_min_chars": {
-        "description": "低密度判定单位",
-        "hint": "中文按字、英文按词、数字按段计数；少于该值且与前后文无关联的消息会被过滤，默认 3",
-        "type": "int",
-        "default": 3
-      },
-      "filter_low_density_night_only": {
-        "description": "仅在凌晨归档过滤",
-        "hint": "默认开启：只在 00:00-06:00 的归档前过滤；关闭后每次归档都会过滤",
-        "type": "bool",
-        "default": true
       }
     }
   },
@@ -264,18 +209,73 @@
         "description": "保留最近工具结果数",
         "type": "int",
         "default": 25,
-        "hint": "最近工具结果至少保留条数；默认 25。是否压缩还受 tool_context_max_chars 预算控制。"
-      },
-      "tool_context_placeholder": {
-        "description": "旧工具结果占位符",
-        "type": "string",
-        "default": "[工具结果已压缩]"
+        "hint": "最近工具结果至少保留条数；默认 25。最近 3 条始终不压缩，且是否压缩还受工具结果总字符预算控制。"
       },
       "tool_context_max_chars": {
         "description": "工具结果总字符预算",
         "hint": "只压缩前缀/最近结果之外的旧工具结果，直到工具结果总量回到该预算；默认 24000。",
         "type": "int",
         "default": 24000
+      },
+      "tool_context_placeholder": {
+        "description": "旧工具结果占位符",
+        "type": "string",
+        "default": "[工具结果已压缩]"
+      }
+    }
+  },
+  "archive": {
+    "description": "归档",
+    "hint": "什么时候整理、记录哪些会话、通知发到哪。",
+    "type": "object",
+    "items": {
+      "extract_times": {
+        "description": "归档时间",
+        "hint": "每日执行归档的时刻，24 小时制，多个时间以逗号分隔。",
+        "type": "string",
+        "default": "04:05,16:05"
+      },
+      "write_scopes": {
+        "description": "记录的会话",
+        "hint": "需要归档的会话，格式 group:群号 或 private:QQ号。",
+        "type": "list",
+        "default": []
+      },
+      "notify_scopes": {
+        "description": "归档通知发到",
+        "hint": "归档完成后向这些会话发送提示；不需要群通知时只保留私聊 scope。",
+        "type": "list",
+        "default": []
+      },
+      "notify_quiet_ranges": {
+        "description": "免打扰时段",
+        "hint": "该时段内不发送归档通知，多个时段以逗号分隔。",
+        "type": "string",
+        "default": "00:00-08:00,12:00-14:00"
+      },
+      "notify_max_per_day": {
+        "description": "通知上限（次）",
+        "hint": "每日最多发送的归档通知条数。",
+        "type": "int",
+        "default": 2
+      },
+      "filter_low_density": {
+        "description": "归档前过滤低密度消息",
+        "hint": "默认开启：归档压缩前丢弃复读、词汇重复、过短或与前后文无共同词的内容，节省 Token",
+        "type": "bool",
+        "default": true
+      },
+      "low_density_min_chars": {
+        "description": "低密度判定单位",
+        "hint": "中文按字、英文按词、数字按段计数；少于该值且与前后文无关联的消息会被过滤，默认 3",
+        "type": "int",
+        "default": 3
+      },
+      "filter_low_density_night_only": {
+        "description": "仅在凌晨归档过滤",
+        "hint": "默认开启：只在 00:00-06:00 的归档前过滤；关闭后每次归档都会过滤",
+        "type": "bool",
+        "default": true
       }
     }
   },
@@ -482,6 +482,83 @@
       }
     }
   },
+  "gate": {
+    "description": "浅层判读门",
+    "hint": "纯规则读空气：@/名字/回复/命令直接放行；其他 @、填充词跳过。",
+    "type": "object",
+    "items": {
+      "gate_enabled": {
+        "description": "启用浅层判读门",
+        "type": "bool",
+        "default": true,
+        "hint": "纯规则读空气：@/名字/回复/命令直接放行；其他 @、填充词跳过；"
+      },
+      "gate_debounce_ms": {
+        "description": "消息防抖毫秒",
+        "type": "int",
+        "default": 700
+      },
+      "gate_names": {
+        "description": "名字触发词",
+        "type": "list",
+        "default": [
+          "鱼鱼"
+        ]
+      },
+      "gate_attention_decay_seconds": {
+        "description": "注意力衰减秒数",
+        "type": "int",
+        "default": 360,
+        "hint": "注意力衰减秒数；默认 360（6 分钟），兼顾活跃段连续性和话题切换。"
+      },
+      "gate_attention_threshold": {
+        "description": "注意力加成阈值",
+        "type": "float",
+        "default": 4.6,
+        "hint": "累计注意力达到该值后允许主动接话；默认 4.6，可由 2.0+1.3+1.3、2.0+1.3+0.7+0.2×3 等组合达到。增量：闲聊 +0.2，弱相关 +0.7，相关 +1.3，强相关 +2.0。"
+      },
+      "cold_cache_seconds": {
+        "description": "冷群缓存有效秒数",
+        "type": "int",
+        "default": 900
+      },
+      "cold_cache_max_messages": {
+        "description": "冷群缓存消息上限",
+        "type": "int",
+        "default": 20
+      },
+      "gate_random_reply_enabled": {
+        "description": "低频随机回复",
+        "hint": "默认关闭；开启后普通群聊有概率进入主模型。请关闭 AstrBot 自带的概率回复，避免双重触发。",
+        "type": "bool",
+        "default": false
+      },
+      "gate_random_reply_probability": {
+        "description": "随机回复概率",
+        "hint": "0–1，默认 0.02；建议低频，按群活跃度调整。",
+        "type": "float",
+        "default": 0.02
+      },
+      "gate_ambient_reply_probability": {
+        "description": "相关话题主动回复概率",
+        "hint": "没有叫名字时，相关提问/图片获得主动请求的概率；默认 0.15。",
+        "type": "float",
+        "default": 0.15
+      },
+      "gate_ambient_cooldown_seconds": {
+        "description": "主动回复冷却秒数",
+        "hint": "同一发送者两次主动请求之间的最小间隔；默认 120 秒，不同发送者互不阻塞。",
+        "type": "int",
+        "default": 120
+      },
+      "gate_attention_reply_enabled": {
+        "description": "注意力机制主动回复",
+        "hint": "默认开启；高注意力发送者可在没有叫名字时主动接话，仍受冷却限制。",
+        "type": "bool",
+        "default": true
+      }
+    }
+  },
   "filter": {
     "description": "内容过滤",
     "hint": "归档前的脱敏。",
@@ -577,6 +654,41 @@
       }
     }
   },
+  "cache": {
+    "description": "缓存保护",
+    "hint": "鱼鱼日记自己的缓存守卫；由鱼鱼日记自身维护。",
+    "type": "object",
+    "items": {
+      "cache_guard_minutes": {
+        "description": "活跃保护分钟数",
+        "type": "int",
+        "default": 120,
+        "hint": "活跃保护分钟数；默认 120，长度仍有阈值兜底。"
+      },
+      "cache_prefix_messages": {
+        "description": "保护前缀消息数",
+        "type": "int",
+        "default": 105
+      },
+      "index_snapshot_ttl_seconds": {
+        "description": "索引快照刷新秒数",
+        "type": "int",
+        "default": 10800
+      },
+      "artifact_retention_days": {
+        "description": "工具归档保留天数",
+        "type": "int",
+        "default": 15,
+        "hint": "工具 artifact 保留天数；默认 15。"
+      },
+      "artifact_max_files": {
+        "description": "工具归档最大文件数",
+        "type": "int",
+        "default": 400,
+        "hint": "工具 artifact 每个 scope 最多保留文件数；默认 400。"
+      }
+    }
+  },
   "security": {
     "description": "安全与加密",
     "hint": "加密强度、密钥、备份校验、状态面板。",
@@ -649,118 +761,6 @@
           "第 3 步：执行重置"
         ],
         "default": "不重置"
-      }
-    }
-  },
-  "gate": {
-    "description": "浅层判读门",
-    "hint": "纯规则读空气：@/名字/回复/命令直接放行；其他 @、填充词跳过。",
-    "type": "object",
-    "items": {
-      "gate_enabled": {
-        "description": "启用浅层判读门",
-        "type": "bool",
-        "default": true,
-        "hint": "纯规则读空气：@/名字/回复/命令直接放行；其他 @、填充词跳过；"
-      },
-      "gate_debounce_ms": {
-        "description": "消息防抖毫秒",
-        "type": "int",
-        "default": 700
-      },
-      "gate_names": {
-        "description": "名字触发词",
-        "type": "list",
-        "default": [
-          "鱼鱼"
-        ]
-      },
-      "gate_attention_decay_seconds": {
-        "description": "注意力衰减秒数",
-        "type": "int",
-        "default": 360,
-        "hint": "注意力衰减秒数；默认 360（6 分钟），兼顾活跃段连续性和话题切换。"
-      },
-      "gate_attention_threshold": {
-        "description": "注意力加成阈值",
-        "type": "float",
-        "default": 4.6,
-        "hint": "累计注意力达到该值后允许主动接话；默认 4.6，可由 2.0+1.3+1.3、2.0+1.3+0.7+0.2×3 等组合达到。增量：闲聊 +0.2，弱相关 +0.7，相关 +1.3，强相关 +2.0。"
-      },
-      "cold_cache_seconds": {
-        "description": "冷群缓存有效秒数",
-        "type": "int",
-        "default": 900
-      },
-      "cold_cache_max_messages": {
-        "description": "冷群缓存消息上限",
-        "type": "int",
-        "default": 20
-      },
-      "gate_random_reply_enabled": {
-        "description": "低频随机回复",
-        "hint": "默认关闭；开启后普通群聊有概率进入主模型。请关闭 AstrBot 自带的概率回复，避免双重触发。",
-        "type": "bool",
-        "default": false
-      },
-      "gate_random_reply_probability": {
-        "description": "随机回复概率",
-        "hint": "0–1，默认 0.02；建议低频，按群活跃度调整。",
-        "type": "float",
-        "default": 0.02
-      },
-      "gate_ambient_reply_probability": {
-        "description": "相关话题主动回复概率",
-        "hint": "没有叫名字时，相关提问/图片获得主动请求的概率；默认 0.15。",
-        "type": "float",
-        "default": 0.15
-      },
-      "gate_ambient_cooldown_seconds": {
-        "description": "主动回复冷却秒数",
-        "hint": "同一发送者两次主动请求之间的最小间隔；默认 120 秒，不同发送者互不阻塞。",
-        "type": "int",
-        "default": 120
-      },
-      "gate_attention_reply_enabled": {
-        "description": "注意力机制主动回复",
-        "hint": "默认开启；高注意力发送者可在没有叫名字时主动接话，仍受冷却限制。",
-        "type": "bool",
-        "default": true
-      }
-    }
-  },
-  "cache": {
-    "description": "缓存保护",
-    "hint": "鱼鱼日记自己的缓存守卫；由鱼鱼日记自身维护。",
-    "type": "object",
-    "items": {
-      "cache_guard_minutes": {
-        "description": "活跃保护分钟数",
-        "type": "int",
-        "default": 120,
-        "hint": "活跃保护分钟数；默认 120，长度仍有阈值兜底。"
-      },
-      "cache_prefix_messages": {
-        "description": "保护前缀消息数",
-        "type": "int",
-        "default": 105
-      },
-      "index_snapshot_ttl_seconds": {
-        "description": "索引快照刷新秒数",
-        "type": "int",
-        "default": 10800
-      },
-      "artifact_retention_days": {
-        "description": "工具归档保留天数",
-        "type": "int",
-        "default": 15,
-        "hint": "工具 artifact 保留天数；默认 15。"
-      },
-      "artifact_max_files": {
-        "description": "工具归档最大文件数",
-        "type": "int",
-        "default": 400,
-        "hint": "工具 artifact 每个 scope 最多保留文件数；默认 400。"
       }
     }
   }
