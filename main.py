@@ -1043,7 +1043,7 @@ class Memory5(Star):
 
     @property
     def normal_budget(self) -> int:
-        return self._int_raw("normal_budget_chars", 1200)
+        return self._int_raw("normal_budget_chars", 1000)
 
     def remind_times(self) -> list[tuple[int, int]]:
         raw = str(self._get("remind_times", "08:00,20:00"))
@@ -1743,7 +1743,7 @@ class Memory5(Star):
                     shared_callname.append(line)
                 elif topic == "关系":
                     shared_relation.append(line)
-        shared = shared_identity[: self._int("identity_max", 5)] + shared_callname[: self._int("callname_max", 5)]
+        shared = shared_identity[: self._int("identity_max", 4)] + shared_callname[: self._int("callname_max", 4)]
         relation_budget = self._int("shared_relation_max_chars", 1000)
         relation_lines: list[str] = []
         used_chars = 0

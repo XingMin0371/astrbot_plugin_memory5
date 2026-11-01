@@ -195,19 +195,19 @@
         "items": {
           "identity_max": {
             "description": "共享身份条数（条）",
-            "hint": "每个 QQ 最多注入的身份信息条数。",
+            "hint": "每个 QQ 最多注入的身份信息条数；默认 4。",
             "type": "int",
-            "default": 5
+            "default": 4
           },
           "callname_max": {
             "description": "共享称呼条数（条）",
-            "hint": "每个 QQ 最多注入的称呼条数。",
+            "hint": "每个 QQ 最多注入的称呼条数；默认 4。",
             "type": "int",
-            "default": 5
+            "default": 4
           },
           "shared_relation_max_chars": {
             "description": "共享关系上限（字符）",
-            "hint": "关系类共享记忆字符上限；默认 1000，约可容纳 8 条。",
+            "hint": "关系类共享记忆字符上限；默认 1000。",
             "type": "int",
             "default": 1000
           }
@@ -220,9 +220,9 @@
         "items": {
           "normal_budget_chars": {
             "description": "普通记忆预算（字符）",
-            "hint": "普通与低密度记忆单独计算，0 表示不限制。",
+            "hint": "普通与低密度记忆单独计算，0 表示不限制；默认 1000。",
             "type": "int",
-            "default": 1200
+            "default": 1000
           },
           "random_min": {
             "description": "随机注入条数（条）",
