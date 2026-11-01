@@ -2070,25 +2070,31 @@ class Memory5(Star):
         return f"可用：{available}\n" + "\n".join(lines)
 
     def _trim_tool_context(self, req, allow_cleanup: bool, scope: str = "") -> int:
-        """Emergency tool-loop trim, guarded by idle time and a stable prefix."""
-        if not allow_cleanup or not bool(self._get("tool_context_compress", True)):
+        """Trim old tool results; recent 3 are a hard floor unless oversized."""
+        if not bool(self._get("tool_context_compress", True)):
             return 0
         contexts = getattr(req, "contexts", None)
         if not isinstance(contexts, list):
             return 0
         trigger = max(10000, self._int("tool_context_trigger_chars", 48000, 10000))
-        total = sum(len(str(m.get("content", ""))) for m in contexts if isinstance(m, dict))
-        if total < trigger:
-            return 0
-        keep = max(3, self._int("tool_context_keep_results", 25, 1))
         budget = max(4000, self._int("tool_context_max_chars", 24000, 4000))
-        prefix, _ = self._cache_protection()
+        total = sum(len(str(m.get("content", ""))) for m in contexts if isinstance(m, dict))
         indices = [i for i, m in enumerate(contexts)
                    if isinstance(m, dict) and m.get("role") == "tool"]
-        candidates = [i for i in (indices[:-keep] if len(indices) > keep else [])
-                      if i >= prefix]
-        placeholder = str(self._get("tool_context_placeholder", "[工具结果已压缩]"))
         used = sum(len(str(contexts[i].get("content", ""))) for i in indices)
+        recent = indices[-3:]
+        recent_used = sum(len(str(contexts[i].get("content", ""))) for i in recent)
+        emergency = total >= trigger * 2.5 or recent_used >= budget * 2.5
+        if not (allow_cleanup or emergency) or total < trigger:
+            return 0
+        keep = max(3, self._int("tool_context_keep_results", 25, 1))
+        prefix, _ = self._cache_protection()
+        old = indices[:-keep]
+        soft = indices[-keep:-3]
+        candidates = [i for i in old + soft if i >= prefix]
+        if recent_used >= budget * 2.5:
+            candidates += [i for i in recent if i >= prefix]
+        placeholder = str(self._get("tool_context_placeholder", "[工具结果已压缩]"))
         changed = 0
         for i in candidates:
             if used <= budget:
