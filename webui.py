@@ -736,6 +736,12 @@ class _TasksMixin:
 
         data_root = os.path.dirname(os.path.dirname(os.path.dirname(MEM_ROOT)))
         add("数据目录可写", os.access(MEM_ROOT, os.W_OK), MEM_ROOT)
+        add("工具结果归档", True, os.path.join(MEM_ROOT, "artifacts"))
+        add(
+            "图片原图归档",
+            True,
+            os.path.join(data_root, "plugin_data", "astrbot_plugin_context_hygiene", "image_artifacts"),
+        )
         try:
             from .main import VERSION
             add("版本", True, VERSION)

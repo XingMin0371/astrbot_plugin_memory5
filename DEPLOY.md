@@ -98,3 +98,15 @@ Linux 下权限设 600。
 - 图片短描述由 `astrbot_plugin_context_hygiene` 负责；未安装时鱼鱼日记仍可独立运行。
 - HTTP 图片下载和描述失败时保留原图，不会强制移除。
 
+## 十、当前轮元数据与余额
+
+- 当前轮会注入发送者、@ 对象、引用对象和自身 QQ 元数据，使用临时 TextPart，不写库。
+- `check_api_balance` 通过 AstrBot Provider 管理器读取当前 Provider；key 支持字符串或列表。
+- 余额仅支持 DeepSeek 官方接口，不把 key 暴露到聊天或日志。
+
+## 十一、归档通知
+
+- 启动追赶归档受 `archive_on_start` 控制；默认关闭。
+- 定时归档仍会按计划运行。
+- 群聊归档通知通过 `notify_scopes` 控制；不需要群通知时只保留私聊 scope。
+- 免打扰时段不会发送通知。

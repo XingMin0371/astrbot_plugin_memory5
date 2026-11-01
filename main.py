@@ -22,6 +22,7 @@ import re
 import shutil
 import sqlite3
 import time
+import urllib.request
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -206,7 +207,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.3"
+VERSION = "2.3.4"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -920,7 +921,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.3.3")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.3.4")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -1617,6 +1618,66 @@ class Memory5(Star):
             return True
         return bool(topic and topic in text)
 
+    def _meta_label(self, scope: str, qq: str) -> str:
+        qq = str(qq or "").strip()
+        if not qq:
+            return "未知"
+        try:
+            aliases = load_aliases(scope)
+            entries = aliases.get(qq, []) if isinstance(aliases, dict) else []
+            for entry in entries or []:
+                alias = str(entry.get("alias", "") if isinstance(entry, dict) else "").strip()
+                if alias:
+                    return alias
+        except Exception:
+            pass
+        return qq
+
+    def _message_meta(self, event: AstrMessageEvent, scope: str) -> str:
+        """Per-turn message metadata; never persisted to memory."""
+        sender = str(event.get_sender_id() or "")
+        try:
+            self_id = str(event.get_self_id() or "")
+        except Exception:
+            self_id = ""
+        if not self_id:
+            bots = sorted(self.bot_qqs())
+            self_id = bots[0] if bots else "未知"
+        name = ""
+        try:
+            get_name = getattr(event, "get_sender_name", None)
+            if callable(get_name):
+                name = str(get_name() or "")
+        except Exception:
+            name = ""
+        if not name:
+            name = self._meta_label(scope, sender)
+        at_targets: list[str] = []
+        reply_target = ""
+        for comp in event.get_messages() or []:
+            kind = type(comp).__name__
+            if kind == "At":
+                target = str(getattr(comp, "qq", "") or getattr(comp, "target", "") or "")
+                if target and target not in at_targets:
+                    at_targets.append(target)
+            elif kind == "Reply":
+                reply_target = str(getattr(comp, "sender_id", "") or "")
+        if not at_targets and not reply_target:
+            return ""
+        at_self = bool(self_id and self_id in at_targets)
+        at_text = "无" if not at_targets else "、".join(
+            f"{self._meta_label(scope, qq)}(QQ {qq})" for qq in at_targets
+        )
+        reply_text = "无" if not reply_target else f"{self._meta_label(scope, reply_target)}(QQ {reply_target})"
+        return (
+            "【当前消息元数据】\n"
+            f"发送者：{name}（QQ {sender}）\n"
+            f"你的QQ：{self_id}\n"
+            f"本条@了你：{'是' if at_self else '否'}\n"
+            f"本条@对象：{at_text}\n"
+            f"本条引用：{reply_text}"
+        )
+
     def build_block(self, scope: str, sender: str, text: str) -> str:
         chunks: list[str] = []
         seen: list[str] = []
@@ -1902,10 +1963,86 @@ class Memory5(Star):
 
     @filter.llm_tool(name="read_memory_artifact")
     async def read_memory_artifact(self, event: AstrMessageEvent, artifact_id: str):
-        """读取被上下文压缩归档的旧工具结果。仅在需要原始细节时调用。"""
+        """读取 memory5 工具结果归档；不是图片原图。仅在需要原始细节时调用。"""
         scope = self.scope_of(event) or ""
         content = self._read_artifact(scope, str(artifact_id or "").strip())
         return content or "没有找到对应的工具结果归档。"
+
+    @filter.llm_tool(name="check_api_balance")
+    async def check_api_balance(self, event: AstrMessageEvent):
+        """查询当前聊天 Provider 的 API 余额；只在用户明确询问余额时调用。"""
+        try:
+            from astrbot.core.provider.entities import ProviderType
+        except Exception:
+            return "当前 AstrBot 版本不支持 Provider 余额查询。"
+        manager = getattr(self.context, "provider_manager", None)
+        if manager is None:
+            return "Provider 管理器不可用，无法查询余额。"
+        try:
+            prov = await manager.get_using_provider_async(
+                ProviderType.CHAT_COMPLETION,
+                str(getattr(event, "unified_msg_origin", "") or ""),
+            )
+        except Exception as exc:
+            logger.warning(f"memory5: 余额 Provider 获取失败 ({type(exc).__name__})")
+            return "当前聊天 Provider 获取失败，无法查询余额。"
+        if prov is None:
+            return "当前没有可用聊天 Provider。"
+        pid = ""
+        try:
+            pid = str(prov.meta().id or "")
+        except Exception:
+            pid = ""
+        cfg = getattr(prov, "provider_config", {}) or {}
+        pid = pid or str(cfg.get("id") or "")
+        merged = {}
+        try:
+            merged = manager.get_provider_config_by_id(pid, merged=True) or {}
+        except Exception:
+            merged = {}
+        if not merged:
+            merged = cfg
+        key = merged.get("key")
+        if isinstance(key, list):
+            key = next((str(x).strip() for x in key if str(x).strip()), "")
+        key = str(key or "").strip()
+        base = str(merged.get("api_base") or cfg.get("api_base") or "").rstrip("/")
+        if not key:
+            return "当前 Provider 没有可用的 API Key，无法查询余额。"
+        if not base:
+            return "当前 Provider 没有 API Base，无法查询余额。"
+        # Use the provider's own base instead of hardcoding a vendor URL.
+        root = base[:-3].rstrip("/") if base.endswith("/v1") else base
+        balance_url = root + "/user/balance"
+
+        def _fetch():
+            req = urllib.request.Request(
+                balance_url,
+                headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        try:
+            data = await asyncio.to_thread(_fetch)
+        except Exception as exc:
+            logger.warning(f"memory5: 余额查询失败 ({type(exc).__name__})")
+            return "余额查询失败：Provider 接口没有返回有效数据。"
+        infos = data.get("balance_infos") if isinstance(data, dict) else None
+        if not isinstance(infos, list) or not infos:
+            return "余额接口返回为空。"
+        lines = []
+        for item in infos:
+            if not isinstance(item, dict):
+                continue
+            cur = str(item.get("currency") or "")
+            total = str(item.get("total_balance") or "")
+            granted = str(item.get("granted_balance") or "")
+            topped = str(item.get("topped_up_balance") or "")
+            lines.append(f"{cur} 总余额 {total}（赠送 {granted}，充值 {topped}）".strip())
+        if not lines:
+            return "余额接口没有可读金额。"
+        available = "是" if data.get("is_available") else "否"
+        return f"可用：{available}\n" + "\n".join(lines)
 
     def _trim_tool_context(self, req, allow_cleanup: bool, scope: str = "") -> int:
         """Emergency tool-loop trim, guarded by idle time and a stable prefix."""
@@ -1965,13 +2102,36 @@ class Memory5(Star):
             if not scope:
                 return
             block = self.build_block(scope, str(event.get_sender_id()), event.message_str or "")
+            meta = self._message_meta(event, scope)
+            prompt = getattr(req, "prompt", None)
             if not block:
+                if not meta:
+                    return
+                if cache_friendly and isinstance(prompt, str) and prompt.strip():
+                    part = _temporary_text_part(meta)
+                    if part is not None:
+                        req.extra_user_content_parts.append(part)
+                    else:
+                        req.prompt = prompt.rstrip() + "\n\n" + meta
+                else:
+                    part = _temporary_text_part(meta)
+                    if part is not None:
+                        req.extra_user_content_parts.append(part)
+                    elif isinstance(prompt, str) and prompt.strip():
+                        req.prompt = prompt.rstrip() + "\n\n" + meta
+                    else:
+                        parts = getattr(req, "extra_user_content_parts", None)
+                        if isinstance(parts, list):
+                            parts.append({"type": "text", "text": meta})
+                        else:
+                            req.system_prompt = (req.system_prompt or "") + "\n\n" + meta
                 return
             tail_at = block.find("\n【近期】")
             tail = ""
             if tail_at >= 0:
                 tail = block[tail_at + 1:]
                 block = block[:tail_at]
+            tail = (tail + "\n\n" + meta) if tail else meta
             text = DEFAULT_HEADER + "\n" + block
             full_text = text + ("\n\n" + tail if tail else "")
             prompt = getattr(req, "prompt", None)
@@ -2423,7 +2583,9 @@ class Memory5(Star):
         """每 12 小时（默认 04:05 / 16:05）整理一次；整理期间不产生聊天回复。"""
         await asyncio.sleep(45)
         last_run = float(read_json(os.path.join(MEM_ROOT, ".last_extract"), {}).get("ts", 0))
-        if time.time() - last_run > 6 * 3600:
+        # Catch-up is a startup action; honor archive_on_start instead of
+        # surprising users who only enabled scheduled archiving.
+        if time.time() - last_run > 6 * 3600 and bool(self._get("archive_on_start", False)):
             if await self._run_extraction():
                 await self._notify_archived()
         while True:
