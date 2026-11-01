@@ -1712,8 +1712,8 @@ class Memory5(Star):
                 sentence = re.split(r"[。！？!?\n]", body, maxsplit=1)[0].strip()
                 if sentence:
                     body = sentence
-                if len(body) > 60:
-                    body = body[:60].rstrip() + "…"
+                if len(body) > 65:
+                    body = body[:65].rstrip() + "…"
                 rendered_core.append(
                     f"- [{matched.group('topic')}] {matched.group('subject')} :: "
                     f"{body}（更新 {matched.group('date')}）"
