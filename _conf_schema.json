@@ -502,7 +502,7 @@
       "gate_debounce_ms": {
         "description": "消息防抖毫秒",
         "type": "int",
-        "default": 700
+        "default": 1200
       },
       "gate_names": {
         "description": "名字触发词",
@@ -562,6 +562,24 @@
         "description": "冷群缓存消息上限",
         "type": "int",
         "default": 20
+      },
+      "gate_batch_max_messages": {
+        "description": "单次合并消息上限",
+        "type": "int",
+        "default": 5,
+        "hint": "同一段防抖窗口内最多合并多少条；默认 8。"
+      },
+      "gate_log_enabled": {
+        "description": "记录判读决策日志",
+        "type": "bool",
+        "default": true,
+        "hint": "只记分数、注意力、冷却和结论，不记正文；默认开启。"
+      },
+      "gate_log_sample": {
+        "description": "判读日志采样率",
+        "type": "float",
+        "default": 0.5,
+        "hint": "0~1；默认 0.5，群特别活跃时可降到 0.2。"
       }
     }
   },

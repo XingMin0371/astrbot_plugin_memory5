@@ -207,7 +207,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.4"
+VERSION = "2.3.5"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -899,7 +899,7 @@ EXTRACT_PROMPT = """你是记忆整理器。下面是一段 QQ 群/私聊的新�
 - impact: 1=低, 2=中, 3=高（对以后相处的影响）
 - info: 0=没有信息, 1=低, 2=中, 3=高
 - due: 如果有时效性（约定在某天做某事），填 ISO 时间 "YYYY-MM-DDTHH:MM:SS"，否则 null
-- text: 一条记忆句子，口语备忘风格，主谓宾完整，不超过 40 字
+- text: 一条记忆句子，口语备忘风格，主谓宾完整，不超过 45 字
 - aliases: 可选的别名列表，形如 [{"qq":"123","alias":"外号","source":"self或other"}]
 
 text 的写法（很重要）：
@@ -921,7 +921,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.3.4")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.3.5")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -1207,6 +1207,47 @@ class Memory5(Star):
             conversation = None
         return event.request_llm(prompt=text, conversation=conversation, image_urls=image_urls or [])
 
+    def _gate_log(self, scope: str, sender: str, direct: bool, score: int,
+                  attention: float, decision: str, reason: str,
+                  text_len: int) -> None:
+        """Write a cheap decision log; never record message text."""
+        try:
+            if not bool(self._get("gate_log_enabled", True)):
+                return
+            sample = max(0.0, min(1.0, self._float_cfg("gate_log_sample", 0.5)))
+            if sample <= 0 or random.random() > sample:
+                return
+            now = datetime.now(TZ)
+            log_dir = os.path.join(DATA_DIR, "plugin_data", "astrbot_plugin_memory5", "gate_logs")
+            os.makedirs(log_dir, exist_ok=True)
+            path = os.path.join(log_dir, now.strftime("%Y-%m-%d") + ".jsonl")
+            row = {
+                "ts": now.isoformat(timespec="seconds"),
+                "scope": scope,
+                "sender": sender,
+                "direct": bool(direct),
+                "score": int(score),
+                "attention": round(float(attention), 2),
+                "decision": decision,
+                "reason": reason,
+                "text_len": int(text_len),
+            }
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            # Keep only the newest 5 daily files.
+            files = sorted(
+                (os.path.join(log_dir, name) for name in os.listdir(log_dir) if name.endswith(".jsonl")),
+                key=os.path.getmtime,
+                reverse=True,
+            )
+            for old in files[5:]:
+                try:
+                    os.remove(old)
+                except OSError:
+                    pass
+        except Exception as exc:  # logging must never break the gate
+            logger.debug(f"memory5: gate log skipped ({type(exc).__name__}: {exc})")
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def light_gate(self, event: AstrMessageEvent):
         """Cheap rule gate; selected ambient messages explicitly request the LLM."""
@@ -1235,6 +1276,9 @@ class Memory5(Star):
             self._gate_seq[scope] = seq
             buffer = self._gate_buffers.setdefault(scope, [])
             buffer.append(text)
+            batch_max = max(1, self._int_raw("gate_batch_max_messages", 8))
+            if len(buffer) > batch_max:
+                del buffer[:-batch_max]
             if debounce:
                 await asyncio.sleep(debounce)
             if self._gate_seq.get(scope) != seq:
@@ -1251,6 +1295,7 @@ class Memory5(Star):
                     name.casefold() in text.casefold() for name in self._gate_names()
                 )
                 if direct:
+                    self._gate_log(scope, sender, True, 0, 0.0, "allow", "direct", len(text))
                     event.message_str = self._promote_cold(scope, text)
                     return
                 other_targets = self._gate_other_at_targets(event)
@@ -1264,6 +1309,7 @@ class Memory5(Star):
                     now = time.time()
                     if (random.random() < probability
                             and now - self._ambient_last.get(ambient_key, 0) >= cooldown):
+                        self._gate_log(scope, sender, False, 0, 0.0, "allow", "image_random", len(text))
                         image_urls = []
                         for comp in (event.get_messages() or []):
                             if type(comp).__name__ in ("Image", "Face"):
@@ -1273,8 +1319,11 @@ class Memory5(Star):
                         self._ambient_last[ambient_key] = now
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, text or "[图片]", image_urls)
+                    else:
+                        self._gate_log(scope, sender, False, 0, 0.0, "drop", "image_skip", len(text))
                     return
                 if self._gate_clear_skip(event, text):
+                    self._gate_log(scope, sender, False, 0, 0.0, "drop", "clear_skip", len(text))
                     event.should_call_llm(False)
                     return
                 # Conservative score: skip obvious filler/media, judge the middle.
@@ -1334,6 +1383,7 @@ class Memory5(Star):
                         score += 1
                     sender_delta = self._attention_increment(score) * sender_weight
                     target_state[sender] = (now, min(10.0, attention + sender_delta))
+                    self._gate_log(scope, sender, False, score, attention, "drop", "other_target", len(text))
                     event.should_call_llm(False)
                     return
 
@@ -1356,6 +1406,7 @@ class Memory5(Star):
 
                 if score <= 0:
                     if attention_hit and cooldown_ok:
+                        self._gate_log(scope, sender, False, score, attention, "allow", "attention", len(text))
                         self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
@@ -1364,11 +1415,13 @@ class Memory5(Star):
                     ambient = bool(self._get("gate_random_reply_enabled", False))
                     probability = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
                     if (ambient and random.random() < probability and cooldown_ok):
+                        self._gate_log(scope, sender, False, score, attention, "allow", "random", len(text))
                         self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, event.message_str)
                         return
+                    self._gate_log(scope, sender, False, score, attention, "drop", "below_threshold", len(text))
                     self._remember_cold(scope, text)
                     event.should_call_llm(False)
                     return
@@ -1376,6 +1429,7 @@ class Memory5(Star):
                     # Attention can proactively interject; related questions
                     # still use the lower-frequency ambient probability.
                     if attention_hit and cooldown_ok:
+                        self._gate_log(scope, sender, False, score, attention, "allow", "attention", len(text))
                         self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
@@ -1384,11 +1438,13 @@ class Memory5(Star):
                     related = score >= 2
                     probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
                     if (related and random.random() < probability and cooldown_ok):
+                        self._gate_log(scope, sender, False, score, attention, "allow", "related_random", len(text))
                         self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, event.message_str)
                         return
+                    self._gate_log(scope, sender, False, score, attention, "allow", "related", len(text))
                     event.message_str = self._promote_cold(scope, text)
                     return
         except Exception as exc:  # gate failure must fail open
