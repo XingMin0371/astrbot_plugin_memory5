@@ -201,18 +201,25 @@ def _append_system_context(req, text: str) -> bool:
     return True
 
 
-def _append_no_save_context(req, text: str) -> bool:
-    """把动态记忆作为本轮临时消息，标记 _no_save，绝不写入历史。"""
+def _append_no_save_context(req, text: str, position: str = "end") -> bool:
+    """把记忆作为本轮临时消息，标记 _no_save，绝不写入历史。"""
     if not text:
         return False
     contexts = getattr(req, "contexts", None)
     if not isinstance(contexts, list):
         return False
-    contexts.append({
+    for item in contexts:
+        if isinstance(item, dict) and item.get("_no_save") and text in json.dumps(item, ensure_ascii=False):
+            return True
+    item = {
         "role": "user",
         "content": [{"type": "text", "text": text}],
         "_no_save": True,
-    })
+    }
+    if position == "start":
+        contexts.insert(0, item)
+    else:
+        contexts.append(item)
     return True
 
 DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
@@ -2233,24 +2240,24 @@ class Memory5(Star):
             meta = self._message_meta(event, scope)
             if not block:
                 if meta:
-                    _append_system_context(req, meta)
+                    _append_no_save_context(req, MEMORY_SAFE_HEADER + meta + MEMORY_SAFE_FOOTER, "end")
                 return
-            # 稳定核心（长期/身份）放 system；重要、近期、提醒属于动态内容。
-            markers = ("\n【重要】", "\n【近期】", "\n【提醒】")
-            positions = [block.find(m) for m in markers if block.find(m) >= 0]
+            # 稳定段只放长期记忆，放在 system 与历史之间。
+            # 身份（共享）是按发送者变化的，必须放尾部，避免群聊前缀抖动。
+            dynamic_markers = ("\n【身份（共享）】", "\n【重要】", "\n【近期】", "\n【提醒】")
+            positions = [block.find(m) for m in dynamic_markers if block.find(m) >= 0]
             split_at = min(positions) if positions else len(block)
             stable = block[:split_at].strip()
             dynamic = block[split_at:].strip()
-            stable_text = ""
             if stable:
                 stable_text = MEMORY_SAFE_HEADER + _sanitize_memory_text(stable) + MEMORY_SAFE_FOOTER
-                _append_system_context(req, stable_text)
+                _append_no_save_context(req, stable_text, "start")
             if dynamic or meta:
                 dynamic_text = dynamic
                 if meta:
                     dynamic_text = (dynamic_text + "\n\n" + meta).strip()
                 dynamic_text = MEMORY_SAFE_HEADER + _sanitize_memory_text(dynamic_text) + MEMORY_SAFE_FOOTER
-                if not _append_no_save_context(req, dynamic_text):
+                if not _append_no_save_context(req, dynamic_text, "end"):
                     logger.warning("memory5: 临时消息通道不可用，跳过动态记忆注入")
         except Exception as exc:  # 记忆出错不影响对话
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
