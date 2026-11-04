@@ -240,7 +240,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.11"
+VERSION = "2.3.10"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -2095,13 +2095,30 @@ class Memory5(Star):
             logger.info(f"memory5: 清理无入口工具归档 {removed} 个")
         return removed
 
+    def _orphan_scan_stamp_path(self) -> str:
+        return os.path.join(MEM_ROOT, ".artifact_orphan_scan")
+
     async def _artifact_orphan_loop(self) -> None:
+        """距上次完成扫描超过 25 小时才执行，避免频繁重启反复扫描。"""
+        interval = 25 * 3600
         while True:
             try:
-                await asyncio.to_thread(self.cleanup_orphan_artifacts)
+                last = 0.0
+                try:
+                    with open(self._orphan_scan_stamp_path(), encoding="utf-8") as fh:
+                        last = float(json.load(fh).get("ts", 0) or 0)
+                except Exception:
+                    last = 0.0
+                now = time.time()
+                if now - last >= interval:
+                    await asyncio.to_thread(self.cleanup_orphan_artifacts)
+                    tmp = self._orphan_scan_stamp_path() + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as fh:
+                        json.dump({"ts": now}, fh)
+                    os.replace(tmp, self._orphan_scan_stamp_path())
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"memory5: 孤儿归档清理失败 {type(exc).__name__}: {exc}")
-            await asyncio.sleep(25 * 3600)
+            await asyncio.sleep(3600)
 
     def _store_artifact(self, scope: str, content: str) -> str:
         raw = content.encode("utf-8", "ignore")
