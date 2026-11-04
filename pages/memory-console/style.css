@@ -141,3 +141,5 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 #bulkPanel .actions { justify-content: center; }
 
 .row .push-right { margin-left: auto; }
+
+.entry, .card { content-visibility: auto; contain-intrinsic-size: 120px; }
