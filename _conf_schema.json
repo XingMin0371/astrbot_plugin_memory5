@@ -203,25 +203,25 @@
       "tool_context_trigger_chars": {
         "description": "工具上下文触发字符数",
         "type": "int",
-        "default": 48000
+        "default": 38400
       },
       "tool_context_keep_results": {
         "description": "保留最近工具结果数",
         "type": "int",
-        "default": 25,
-        "hint": "活跃时最近 25 条软保护；空闲清理时只保留最近 15 条。最近 3 条优先保护，达到预算 2.05 倍才会压缩。"
+        "default": 20,
+        "hint": "活跃时最近 20 条软保护；空闲清理时只保留最近 10 条。最近 3 条优先保护，达到预算 2.05 倍才会压缩。"
       },
       "tool_context_idle_keep_results": {
         "description": "空闲清理保留工具结果数",
-        "hint": "空闲清理模式下优先保护最近多少条工具结果；默认 15。不是硬保证，预算不足时会继续压缩更早结果；最近 3 条仍优先保护。",
+        "hint": "空闲清理模式下优先保护最近多少条工具结果；默认 10。不是硬保证，预算不足时会继续压缩更早结果；最近 3 条仍优先保护。",
         "type": "int",
-        "default": 15
+        "default": 10
       },
       "tool_context_max_chars": {
         "description": "工具结果总字符预算",
-        "hint": "只压缩前缀/最近结果之外的旧工具结果，直到工具结果总量回到该预算；默认 24000。",
+        "hint": "只压缩前缀/最近结果之外的旧工具结果，直到工具结果总量回到该预算；默认 19200。",
         "type": "int",
-        "default": 24000
+        "default": 19200
       },
       "tool_context_placeholder": {
         "description": "旧工具结果占位符",
