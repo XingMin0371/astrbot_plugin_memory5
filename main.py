@@ -240,7 +240,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.14"
+VERSION = "2.3.10"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -980,9 +980,6 @@ class Memory5(Star):
         self._cold_cache: dict[str, deque] = {}
         self._index_snapshot: dict[str, tuple[str, float]] = {}
         self._last_request_at: dict[str, float] = {}
-        self._cache_guard_started: dict[str, float] = {}
-        self._tool_seen_at: dict[str, dict[str, float]] = {}
-        self._context_seen_at: dict[str, dict[str, float]] = {}
         self._ambient_last: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
@@ -1659,16 +1656,12 @@ class Memory5(Star):
         removed = 0
         recent = max(0, self._int("keep_recent_turns", 15, 0)) * 2
         recent_start = max(0, len(contexts) - recent)
-        prefix, guard = self._cache_protection()
-        seen = self._context_seen_at.setdefault(scope or "", {})
-        cutoff = time.time() - guard * 60
+        prefix, _ = self._cache_protection()
         for idx, item in enumerate(contexts):
             text = self._context_text(item) if isinstance(item, dict) else ""
-            key = hashlib.sha1(str(item).encode("utf-8", "ignore")).hexdigest()
-            first = seen.setdefault(key, time.time())
             if text:
                 text = self._normalize_compare(self._normalize_time(text))
-            if (idx >= prefix and idx < recent_start and first < cutoff
+            if (idx >= prefix and idx < recent_start
                     and text and text in low_text):
                 removed += 1
                 continue
@@ -2015,23 +2008,19 @@ class Memory5(Star):
             parts_out.append(remind_chunk)
         return "\n\n".join(parts_out)
 
-    def _clean_pending_context(self, req, allow_cleanup: bool = True, scope: str = "") -> int:
+    def _clean_pending_context(self, req, allow_cleanup: bool = True) -> int:
         pending = getattr(self, "_pending_context_clean", None)
         if not allow_cleanup or not pending:
             return 0
         contexts = getattr(req, "contexts", None)
         if not isinstance(contexts, list):
             return 0
-        prefix, guard = self._cache_protection()
-        seen = self._context_seen_at.setdefault(scope or "", {})
-        cutoff = time.time() - guard * 60
+        prefix, _ = self._cache_protection()
         recent_start = max(0, len(contexts) - 30)
         kept, removed = [], 0
         for idx, item in enumerate(contexts):
             text = self._context_text(item) if isinstance(item, dict) else ""
-            key = hashlib.sha1(str(item).encode("utf-8", "ignore")).hexdigest()
-            first = seen.setdefault(key, time.time())
-            if (idx >= prefix and idx < recent_start and first < cutoff and text
+            if (idx >= prefix and idx < recent_start and text
                     and self._normalize_compare(self._normalize_time(text)) in pending):
                 removed += 1
                 continue
@@ -2253,8 +2242,6 @@ class Memory5(Star):
         """Trim old tool results; recent 3 are a hard floor unless oversized."""
         if not bool(self._get("tool_context_compress", True)):
             return 0
-        if not allow_cleanup:
-            return 0
         contexts = getattr(req, "contexts", None)
         if not isinstance(contexts, list):
             return 0
@@ -2269,26 +2256,19 @@ class Memory5(Star):
         emergency_threshold = max(budget * 2.5, trigger * 1.5)
         # 触发口径只看工具结果，不看整个上下文。
         emergency = used >= emergency_threshold or recent_used >= recent_limit
-        if not allow_cleanup:
+        if not (allow_cleanup or emergency):
             return 0
         if used < trigger and not emergency:
             return 0
         keep = max(3, self._int("tool_context_keep_results", 25, 1))
         if allow_cleanup:
             keep = max(3, self._int("tool_context_idle_keep_results", 15, 1))
-        prefix, guard = self._cache_protection()
-        now = time.time()
-        seen = self._tool_seen_at.setdefault(scope or "", {})
-        cutoff = now - guard * 60
-        seen_index: dict[int, float] = {}
-        for i in indices:
-            key = hashlib.sha1(str(contexts[i].get("content", "")).encode("utf-8", "ignore")).hexdigest()
-            seen_index[i] = seen.setdefault(key, now)
+        prefix, _ = self._cache_protection()
         old = indices[:-keep]
         soft = indices[-keep:-3]
-        candidates = [i for i in old + soft if i >= prefix and seen_index.get(i, 0) < cutoff]
+        candidates = [i for i in old + soft if i >= prefix]
         if recent_used >= recent_limit:
-            candidates += [i for i in recent if i >= prefix and seen_index.get(i, 0) < cutoff]
+            candidates += [i for i in recent if i >= prefix]
         placeholder = str(self._get("tool_context_placeholder", "[工具结果已压缩]"))
         changed = 0
         for i in candidates:
@@ -2312,29 +2292,15 @@ class Memory5(Star):
             scope = self.scope_of(event)
             now = time.time()
             _, guard = self._cache_protection()
-            idle_minutes = max(1, self._int_raw("cache_idle_minutes", 5))
             previous = self._last_request_at.get(scope, 0) if scope else 0
-            started = self._cache_guard_started.get(scope, now) if scope else now
-            if scope and scope not in self._cache_guard_started:
-                self._cache_guard_started[scope] = started
+            allow_cleanup = not previous or now - previous >= guard * 60
             if scope:
                 self._last_request_at[scope] = now
-            idle_due = bool(previous and now - previous >= idle_minutes * 60)
-            guard_expired = guard <= 0 or now - started >= guard * 60
-            allow_cleanup = idle_due and guard_expired
-            contexts = getattr(req, "contexts", None)
-            if scope and isinstance(contexts, list):
-                seen_ctx = self._context_seen_at.setdefault(scope, {})
-                for item in contexts:
-                    key = hashlib.sha1(str(item).encode("utf-8", "ignore")).hexdigest()
-                    seen_ctx.setdefault(key, now)
-            if allow_cleanup and scope:
-                self._cache_guard_started[scope] = now
             self._trim_tool_context(req, allow_cleanup, scope or "")
             cache_friendly = bool(self._get("cache_friendly", True))
             # Archive-triggered pending cleanup is the original behavior.
             # Only the low-density context cleanup has its own switch.
-            self._clean_pending_context(req, allow_cleanup, scope or "")
+            self._clean_pending_context(req, allow_cleanup)
             if bool(self._get("low_context_clean", True)) and scope:
                 self._clean_context_low(req, scope, allow_cleanup)
             if not self.enabled_inject:
