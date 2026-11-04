@@ -694,8 +694,8 @@
       "cache_prefix_messages": {
         "description": "保护前缀消息数",
         "type": "int",
-        "default": 65,
-        "hint": "缓存友好模式下保护的前缀消息数；默认 65。"
+        "default": 24,
+        "hint": "缓存友好模式下保护的前缀消息数；默认 24。"
       },
       "index_snapshot_ttl_seconds": {
         "description": "索引快照刷新秒数",
