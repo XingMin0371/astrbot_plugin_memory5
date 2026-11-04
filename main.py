@@ -240,7 +240,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.10"
+VERSION = "2.3.11"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -2049,7 +2049,7 @@ class Memory5(Star):
                 except OSError:
                     pass
 
-    def cleanup_orphan_artifacts(self, grace_days: int = 7) -> int:
+    def cleanup_orphan_artifacts(self, grace_days: int = 3) -> int:
         """删除没有任何指针入口的旧工具归档；不暴露配置项。"""
         root = os.path.join(MEM_ROOT, "artifacts")
         if not os.path.isdir(root):
@@ -2101,7 +2101,7 @@ class Memory5(Star):
                 await asyncio.to_thread(self.cleanup_orphan_artifacts)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"memory5: 孤儿归档清理失败 {type(exc).__name__}: {exc}")
-            await asyncio.sleep(86400)
+            await asyncio.sleep(25 * 3600)
 
     def _store_artifact(self, scope: str, content: str) -> str:
         raw = content.encode("utf-8", "ignore")
