@@ -190,19 +190,14 @@ def _temporary_text_part(text: str):
     return None
 
 
-def _append_temp_context(req, text: str) -> bool:
-    """只把记忆放进本轮请求的临时片段，绝不改 prompt/system_prompt。"""
+def _append_system_context(req, text: str) -> bool:
+    """把记忆放进本轮 system prompt；它不会作为消息写入 conversation。"""
     if not text:
         return False
-    parts = getattr(req, "extra_user_content_parts", None)
-    if not isinstance(parts, list):
-        return False
-    part = _temporary_text_part(text)
-    if part is not None:
-        parts.append(part)
+    base = getattr(req, "system_prompt", None) or ""
+    if text in base:
         return True
-    # 兼容旧版 TextPart 不可用的情况，仍放在临时片段列表里。
-    parts.append({"type": "text", "text": text})
+    req.system_prompt = base.rstrip() + "\n\n" + text
     return True
 
 DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
@@ -223,7 +218,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.6"
+VERSION = "2.3.7"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -2214,7 +2209,7 @@ class Memory5(Star):
             meta = self._message_meta(event, scope)
             if not block:
                 if meta:
-                    _append_temp_context(req, meta)
+                    _append_system_context(req, meta)
                 return
             tail_at = block.find("\n【近期】")
             tail = ""
@@ -2225,7 +2220,7 @@ class Memory5(Star):
             text = DEFAULT_HEADER + "\n" + block
             full_text = text + ("\n\n" + tail if tail else "")
             # 只注入本轮请求，不修改 prompt/system_prompt，避免被写进历史。
-            if not _append_temp_context(req, full_text):
+            if not _append_system_context(req, full_text):
                 logger.warning("memory5: 临时注入通道不可用，跳过本轮记忆注入")
         except Exception as exc:  # 记忆出错不影响对话
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
