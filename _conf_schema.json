@@ -202,9 +202,10 @@
         "hint": "关闭后其他插件进行工具消息控制。"
       },
       "tool_context_trigger_chars": {
-        "description": "工具上下文触发字符数",
+        "description": "工具结果触发字符数",
         "type": "int",
-        "default": 38400
+        "default": 38400,
+        "hint": "只统计工具结果总字符数；超过该值才压缩，不统计整段上下文。"
       },
       "tool_context_keep_results": {
         "description": "保留最近工具结果数",

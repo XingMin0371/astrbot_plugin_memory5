@@ -2176,7 +2176,6 @@ class Memory5(Star):
             return 0
         trigger = max(10000, self._int("tool_context_trigger_chars", 48000, 10000))
         budget = max(4000, self._int("tool_context_max_chars", 24000, 4000))
-        total = sum(len(str(m.get("content", ""))) for m in contexts if isinstance(m, dict))
         indices = [i for i, m in enumerate(contexts)
                    if isinstance(m, dict) and m.get("role") == "tool"]
         used = sum(len(str(contexts[i].get("content", ""))) for i in indices)
@@ -2184,10 +2183,11 @@ class Memory5(Star):
         recent_used = sum(len(str(contexts[i].get("content", ""))) for i in recent)
         recent_limit = budget * 2.05
         emergency_threshold = max(budget * 2.5, trigger * 1.5)
-        emergency = total >= emergency_threshold or recent_used >= recent_limit
+        # 触发口径只看工具结果，不看整个上下文。
+        emergency = used >= emergency_threshold or recent_used >= recent_limit
         if not (allow_cleanup or emergency):
             return 0
-        if total < trigger and not emergency:
+        if used < trigger and not emergency:
             return 0
         keep = max(3, self._int("tool_context_keep_results", 25, 1))
         if allow_cleanup:
