@@ -240,7 +240,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.13"
+VERSION = "2.3.14"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -982,6 +982,7 @@ class Memory5(Star):
         self._last_request_at: dict[str, float] = {}
         self._cache_guard_started: dict[str, float] = {}
         self._tool_seen_at: dict[str, dict[str, float]] = {}
+        self._context_seen_at: dict[str, dict[str, float]] = {}
         self._ambient_last: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
@@ -1658,12 +1659,16 @@ class Memory5(Star):
         removed = 0
         recent = max(0, self._int("keep_recent_turns", 15, 0)) * 2
         recent_start = max(0, len(contexts) - recent)
-        prefix, _ = self._cache_protection()
+        prefix, guard = self._cache_protection()
+        seen = self._context_seen_at.setdefault(scope or "", {})
+        cutoff = time.time() - guard * 60
         for idx, item in enumerate(contexts):
             text = self._context_text(item) if isinstance(item, dict) else ""
+            key = hashlib.sha1(str(item).encode("utf-8", "ignore")).hexdigest()
+            first = seen.setdefault(key, time.time())
             if text:
                 text = self._normalize_compare(self._normalize_time(text))
-            if (idx >= prefix and idx < recent_start
+            if (idx >= prefix and idx < recent_start and first < cutoff
                     and text and text in low_text):
                 removed += 1
                 continue
@@ -2010,19 +2015,23 @@ class Memory5(Star):
             parts_out.append(remind_chunk)
         return "\n\n".join(parts_out)
 
-    def _clean_pending_context(self, req, allow_cleanup: bool = True) -> int:
+    def _clean_pending_context(self, req, allow_cleanup: bool = True, scope: str = "") -> int:
         pending = getattr(self, "_pending_context_clean", None)
         if not allow_cleanup or not pending:
             return 0
         contexts = getattr(req, "contexts", None)
         if not isinstance(contexts, list):
             return 0
-        prefix, _ = self._cache_protection()
+        prefix, guard = self._cache_protection()
+        seen = self._context_seen_at.setdefault(scope or "", {})
+        cutoff = time.time() - guard * 60
         recent_start = max(0, len(contexts) - 30)
         kept, removed = [], 0
         for idx, item in enumerate(contexts):
             text = self._context_text(item) if isinstance(item, dict) else ""
-            if (idx >= prefix and idx < recent_start and text
+            key = hashlib.sha1(str(item).encode("utf-8", "ignore")).hexdigest()
+            first = seen.setdefault(key, time.time())
+            if (idx >= prefix and idx < recent_start and first < cutoff and text
                     and self._normalize_compare(self._normalize_time(text)) in pending):
                 removed += 1
                 continue
@@ -2313,13 +2322,19 @@ class Memory5(Star):
             idle_due = bool(previous and now - previous >= idle_minutes * 60)
             guard_expired = guard <= 0 or now - started >= guard * 60
             allow_cleanup = idle_due and guard_expired
+            contexts = getattr(req, "contexts", None)
+            if scope and isinstance(contexts, list):
+                seen_ctx = self._context_seen_at.setdefault(scope, {})
+                for item in contexts:
+                    key = hashlib.sha1(str(item).encode("utf-8", "ignore")).hexdigest()
+                    seen_ctx.setdefault(key, now)
             if allow_cleanup and scope:
                 self._cache_guard_started[scope] = now
             self._trim_tool_context(req, allow_cleanup, scope or "")
             cache_friendly = bool(self._get("cache_friendly", True))
             # Archive-triggered pending cleanup is the original behavior.
             # Only the low-density context cleanup has its own switch.
-            self._clean_pending_context(req, allow_cleanup)
+            self._clean_pending_context(req, allow_cleanup, scope or "")
             if bool(self._get("low_context_clean", True)) and scope:
                 self._clean_context_low(req, scope, allow_cleanup)
             if not self.enabled_inject:
