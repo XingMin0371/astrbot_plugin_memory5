@@ -191,13 +191,28 @@ def _temporary_text_part(text: str):
 
 
 def _append_system_context(req, text: str) -> bool:
-    """把记忆放进本轮 system prompt；它不会作为消息写入 conversation。"""
+    """把稳定记忆放进本轮 system prompt；它不会作为消息写入 conversation。"""
     if not text:
         return False
     base = getattr(req, "system_prompt", None) or ""
     if text in base:
         return True
     req.system_prompt = base.rstrip() + "\n\n" + text
+    return True
+
+
+def _append_no_save_context(req, text: str) -> bool:
+    """把动态记忆作为本轮临时消息，标记 _no_save，绝不写入历史。"""
+    if not text:
+        return False
+    contexts = getattr(req, "contexts", None)
+    if not isinstance(contexts, list):
+        return False
+    contexts.append({
+        "role": "user",
+        "content": [{"type": "text", "text": text}],
+        "_no_save": True,
+    })
     return True
 
 DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
@@ -218,7 +233,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.8"
+VERSION = "2.3.9"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -2235,13 +2250,8 @@ class Memory5(Star):
                 if meta:
                     dynamic_text = (dynamic_text + "\n\n" + meta).strip()
                 dynamic_text = MEMORY_SAFE_HEADER + _sanitize_memory_text(dynamic_text) + MEMORY_SAFE_FOOTER
-                prompt = getattr(req, "prompt", None)
-                if cache_friendly and isinstance(prompt, str) and prompt.strip():
-                    # 只改当前用户消息前部，不改历史前缀，尽量保住上游缓存。
-                    if not prompt.startswith(dynamic_text):
-                        req.prompt = dynamic_text + "\n\n" + prompt.lstrip()
-                else:
-                    _append_system_context(req, dynamic_text)
+                if not _append_no_save_context(req, dynamic_text):
+                    logger.warning("memory5: 临时消息通道不可用，跳过动态记忆注入")
         except Exception as exc:  # 记忆出错不影响对话
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
 
