@@ -239,7 +239,7 @@
         "description": "归档时间",
         "hint": "每日执行归档的时刻，24 小时制，多个时间以逗号分隔。",
         "type": "string",
-        "default": "04:05,16:05"
+        "default": "01:30,13:30"
       },
       "write_scopes": {
         "description": "记录的会话",
