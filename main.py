@@ -2118,7 +2118,7 @@ class Memory5(Star):
                     os.replace(tmp, self._orphan_scan_stamp_path())
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"memory5: 孤儿归档清理失败 {type(exc).__name__}: {exc}")
-            await asyncio.sleep(3600)
+            await asyncio.sleep(8 * 3600)
 
     def _store_artifact(self, scope: str, content: str) -> str:
         raw = content.encode("utf-8", "ignore")
