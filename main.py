@@ -240,7 +240,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.11"
+VERSION = "2.3.12"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -981,6 +981,7 @@ class Memory5(Star):
         self._index_snapshot: dict[str, tuple[str, float]] = {}
         self._last_request_at: dict[str, float] = {}
         self._cache_guard_started: dict[str, float] = {}
+        self._tool_seen_at: dict[str, dict[str, float]] = {}
         self._ambient_last: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
@@ -2259,19 +2260,26 @@ class Memory5(Star):
         emergency_threshold = max(budget * 2.5, trigger * 1.5)
         # 触发口径只看工具结果，不看整个上下文。
         emergency = used >= emergency_threshold or recent_used >= recent_limit
-        if not (allow_cleanup or emergency):
+        if not allow_cleanup:
             return 0
         if used < trigger and not emergency:
             return 0
         keep = max(3, self._int("tool_context_keep_results", 25, 1))
         if allow_cleanup:
             keep = max(3, self._int("tool_context_idle_keep_results", 15, 1))
-        prefix, _ = self._cache_protection()
+        prefix, guard = self._cache_protection()
+        now = time.time()
+        seen = self._tool_seen_at.setdefault(scope or "", {})
+        cutoff = now - guard * 60
+        seen_index: dict[int, float] = {}
+        for i in indices:
+            key = hashlib.sha1(str(contexts[i].get("content", "")).encode("utf-8", "ignore")).hexdigest()
+            seen_index[i] = seen.setdefault(key, now)
         old = indices[:-keep]
         soft = indices[-keep:-3]
-        candidates = [i for i in old + soft if i >= prefix]
+        candidates = [i for i in old + soft if i >= prefix and seen_index.get(i, 0) < cutoff]
         if recent_used >= recent_limit:
-            candidates += [i for i in recent if i >= prefix]
+            candidates += [i for i in recent if i >= prefix and seen_index.get(i, 0) < cutoff]
         placeholder = str(self._get("tool_context_placeholder", "[工具结果已压缩]"))
         changed = 0
         for i in candidates:
