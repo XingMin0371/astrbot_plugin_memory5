@@ -189,6 +189,22 @@ def _temporary_text_part(text: str):
             continue
     return None
 
+
+def _append_temp_context(req, text: str) -> bool:
+    """只把记忆放进本轮请求的临时片段，绝不改 prompt/system_prompt。"""
+    if not text:
+        return False
+    parts = getattr(req, "extra_user_content_parts", None)
+    if not isinstance(parts, list):
+        return False
+    part = _temporary_text_part(text)
+    if part is not None:
+        parts.append(part)
+        return True
+    # 兼容旧版 TextPart 不可用的情况，仍放在临时片段列表里。
+    parts.append({"type": "text", "text": text})
+    return True
+
 DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
 TZ = timezone(timedelta(hours=8))
 # Internal cache protection; intentionally not exposed as separate settings.
@@ -207,7 +223,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.5"
+VERSION = "2.3.6"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -2196,28 +2212,9 @@ class Memory5(Star):
                 return
             block = self.build_block(scope, str(event.get_sender_id()), event.message_str or "")
             meta = self._message_meta(event, scope)
-            prompt = getattr(req, "prompt", None)
             if not block:
-                if not meta:
-                    return
-                if cache_friendly and isinstance(prompt, str) and prompt.strip():
-                    part = _temporary_text_part(meta)
-                    if part is not None:
-                        req.extra_user_content_parts.append(part)
-                    else:
-                        req.prompt = prompt.rstrip() + "\n\n" + meta
-                else:
-                    part = _temporary_text_part(meta)
-                    if part is not None:
-                        req.extra_user_content_parts.append(part)
-                    elif isinstance(prompt, str) and prompt.strip():
-                        req.prompt = prompt.rstrip() + "\n\n" + meta
-                    else:
-                        parts = getattr(req, "extra_user_content_parts", None)
-                        if isinstance(parts, list):
-                            parts.append({"type": "text", "text": meta})
-                        else:
-                            req.system_prompt = (req.system_prompt or "") + "\n\n" + meta
+                if meta:
+                    _append_temp_context(req, meta)
                 return
             tail_at = block.find("\n【近期】")
             tail = ""
@@ -2227,29 +2224,9 @@ class Memory5(Star):
             tail = (tail + "\n\n" + meta) if tail else meta
             text = DEFAULT_HEADER + "\n" + block
             full_text = text + ("\n\n" + tail if tail else "")
-            if cache_friendly and isinstance(prompt, str) and prompt.strip():
-                # Stable memory stays before the current turn; retrieved
-                # recent/random entries are appended after the question.
-                req.prompt = text + "\n\n" + prompt.lstrip()
-                if tail:
-                    part = _temporary_text_part(tail)
-                    if part is not None:
-                        req.extra_user_content_parts.append(part)
-                    else:
-                        req.prompt += "\n\n" + tail
-                return
-            part = _temporary_text_part(full_text)
-            if part is not None:
-                req.extra_user_content_parts.append(part)
-            else:
-                if isinstance(prompt, str) and prompt.strip():
-                    req.prompt = prompt.rstrip() + "\n\n" + full_text
-                else:
-                    parts = getattr(req, "extra_user_content_parts", None)
-                    if isinstance(parts, list):
-                        parts.append({"type": "text", "text": full_text})
-                    else:
-                        req.system_prompt = (req.system_prompt or "") + "\n\n" + full_text
+            # 只注入本轮请求，不修改 prompt/system_prompt，避免被写进历史。
+            if not _append_temp_context(req, full_text):
+                logger.warning("memory5: 临时注入通道不可用，跳过本轮记忆注入")
         except Exception as exc:  # 记忆出错不影响对话
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
 
