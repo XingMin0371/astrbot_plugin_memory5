@@ -240,7 +240,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.3.10"
+VERSION = "2.3.11"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -980,6 +980,7 @@ class Memory5(Star):
         self._cold_cache: dict[str, deque] = {}
         self._index_snapshot: dict[str, tuple[str, float]] = {}
         self._last_request_at: dict[str, float] = {}
+        self._cache_guard_started: dict[str, float] = {}
         self._ambient_last: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
@@ -2242,6 +2243,8 @@ class Memory5(Star):
         """Trim old tool results; recent 3 are a hard floor unless oversized."""
         if not bool(self._get("tool_context_compress", True)):
             return 0
+        if not allow_cleanup:
+            return 0
         contexts = getattr(req, "contexts", None)
         if not isinstance(contexts, list):
             return 0
@@ -2292,10 +2295,18 @@ class Memory5(Star):
             scope = self.scope_of(event)
             now = time.time()
             _, guard = self._cache_protection()
+            idle_minutes = max(1, self._int_raw("cache_idle_minutes", 5))
             previous = self._last_request_at.get(scope, 0) if scope else 0
-            allow_cleanup = not previous or now - previous >= guard * 60
+            started = self._cache_guard_started.get(scope, now) if scope else now
+            if scope and scope not in self._cache_guard_started:
+                self._cache_guard_started[scope] = started
             if scope:
                 self._last_request_at[scope] = now
+            idle_due = bool(previous and now - previous >= idle_minutes * 60)
+            guard_expired = guard <= 0 or now - started >= guard * 60
+            allow_cleanup = idle_due and guard_expired
+            if allow_cleanup and scope:
+                self._cache_guard_started[scope] = now
             self._trim_tool_context(req, allow_cleanup, scope or "")
             cache_friendly = bool(self._get("cache_friendly", True))
             # Archive-triggered pending cleanup is the original behavior.
