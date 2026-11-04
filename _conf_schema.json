@@ -198,7 +198,8 @@
       "tool_context_compress": {
         "description": "工具循环上下文压缩",
         "type": "bool",
-        "default": true
+        "default": false,
+        "hint": "关闭后其他插件进行工具消息控制。"
       },
       "tool_context_trigger_chars": {
         "description": "工具上下文触发字符数",
