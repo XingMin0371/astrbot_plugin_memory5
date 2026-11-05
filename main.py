@@ -250,6 +250,12 @@ TOPIC_ALIASES = {
     "性格": ("性格", "脾气", "为人"),
 }
 RECALL_WORDS = ("还记得", "记不记得", "记得吗", "以前", "之前", "上次", "那次", "想起来", "回忆", "我说过", "答应过")
+CORE_TOPIC_GROUPS = (
+    ("主人", "身份", "称呼", "关系", "权限", "管理员"),
+    ("底线", "保密", "私密", "原则"),
+    ("归档流程", "查询习惯", "回复规则", "相处观", "图片规则", "记忆", "脱敏", "日记本"),
+)
+CORE_VOLATILE_TOPICS = ("约定", "日记约定", "事件", "喜好", "偏好", "习惯", "作息", "担心", "自由偏好", "日记隐私")
 GENERIC_KEYWORDS = {
     "今天", "昨天", "明天", "现在", "时候", "什么", "怎么", "可以", "一个", "我们", "他们",
     "这个", "那个", "没有", "就是", "还是", "因为", "所以", "如果", "然后", "已经", "自己",
@@ -1699,6 +1705,27 @@ class Memory5(Star):
         else:
             self._index_snapshot.pop(scope, None)
 
+    @staticmethod
+    def _core_priority(topic: str) -> int:
+        for idx, group in enumerate(CORE_TOPIC_GROUPS):
+            if any(word in topic for word in group):
+                return idx
+        if any(word in topic for word in CORE_VOLATILE_TOPICS):
+            return 9
+        return 6
+
+    @classmethod
+    def _core_sort_key(cls, line: str):
+        matched = CORE_LINE_RE.match(line.strip())
+        if not matched:
+            return (0, "", line)
+        return (
+            cls._core_priority(matched.group("topic")),
+            matched.group("topic"),
+            matched.group("subject"),
+            line,
+        )
+
     def _core_text(self, scope: str, limit: int | None = None) -> str:
         text = read_text(scope_paths(scope)["core"]).strip()
         limit = limit or self.keep_core
@@ -1831,6 +1858,45 @@ class Memory5(Star):
     def _mentions(text: str) -> set[str]:
         return set(re.findall(r"\d{5,12}", text or ""))
 
+    def _resolve_alias_ids(self, scope: str, text: str) -> set[str]:
+        if not scope:
+            return set()
+        try:
+            aliases = load_aliases(scope)
+        except Exception:
+            return set()
+        found: dict[str, list[tuple[float, str]]] = {}
+        for qq, entries in aliases.items():
+            for entry in entries or []:
+                if not isinstance(entry, dict):
+                    continue
+                alias = str(entry.get("alias", "")).strip()
+                if len(alias) < 2 or alias not in text:
+                    continue
+                try:
+                    confidence = float(entry.get("confidence", 0) or 0)
+                except (TypeError, ValueError):
+                    confidence = 0.0
+                found.setdefault(alias, []).append((confidence, str(qq)))
+        resolved: set[str] = set()
+        for candidates in found.values():
+            by_qq: dict[str, float] = {}
+            for confidence, qq in candidates:
+                by_qq[qq] = max(by_qq.get(qq, 0.0), confidence)
+            ranked = sorted(by_qq.items(), key=lambda item: item[1], reverse=True)
+            if not ranked:
+                continue
+            if len(ranked) > 1 and abs(ranked[0][1] - ranked[1][1]) < 1e-9:
+                continue  # ambiguous alias: do not guess
+            resolved.add(ranked[0][0])
+        return resolved
+
+    def _subject_hit(self, entry: dict, text: str, sender: str, scope: str = "") -> bool:
+        subject = str(entry.get("subject"))
+        if subject == str(sender) or subject in self._mentions(text):
+            return True
+        return subject in self._resolve_alias_ids(scope, text)
+
     @staticmethod
     def _topic_terms(topic: str) -> list[str]:
         topic = str(topic or "").strip()
@@ -1859,10 +1925,10 @@ class Memory5(Star):
         return [token for token in self._entry_keywords(entry) if token in norm]
 
     def _match(self, entry: dict, text: str, sender: str,
-               strict_topic: bool = False, recall_intent: bool = False) -> bool:
+               strict_topic: bool = False, recall_intent: bool = False,
+               scope: str = "") -> bool:
         topic = str(entry.get("topic", ""))
-        subject = str(entry.get("subject"))
-        subject_hit = subject == str(sender) or subject in self._mentions(text)
+        subject_hit = self._subject_hit(entry, text, sender, scope)
         topic_hit = self._topic_hit(topic, text)
         if not subject_hit:
             # Another person's memory only matches the exact topic; aliases and
@@ -1877,10 +1943,9 @@ class Memory5(Star):
         # two independent keyword hits. Recall intent no longer injects all.
         return any(len(token) >= 3 for token in hits) or len(hits) >= 2
 
-    def _match_loose(self, entry: dict, text: str, sender: str) -> bool:
+    def _match_loose(self, entry: dict, text: str, sender: str, scope: str = "") -> bool:
         topic = str(entry.get("topic", ""))
-        subject = str(entry.get("subject"))
-        if subject != str(sender) and subject not in self._mentions(text):
+        if not self._subject_hit(entry, text, sender, scope):
             return False
         if topic in SENSITIVE_TOPICS:
             return False
@@ -1889,11 +1954,10 @@ class Memory5(Star):
             return False
         return bool(self._keyword_hits(entry, text))
 
-    def _match_score(self, entry: dict, text: str, sender: str) -> int:
+    def _match_score(self, entry: dict, text: str, sender: str, scope: str = "") -> int:
         topic = str(entry.get("topic", ""))
-        subject = str(entry.get("subject"))
         score = 0
-        if subject == str(sender) or subject in self._mentions(text):
+        if self._subject_hit(entry, text, sender, scope):
             score += 3
         norm = _norm_text(text)
         if topic and _norm_text(topic) in norm:
@@ -2017,7 +2081,7 @@ class Memory5(Star):
         core = self._snapshot_core(scope)
         if core:
             rendered_core: list[str] = []
-            for line in core.splitlines():
+            for line in sorted(core.splitlines(), key=self._core_sort_key):
                 matched = CORE_LINE_RE.match(line.strip())
                 is_dup(matched.group("text") if matched else line)
                 if not matched or not compact_memory or matched.group("topic") in PERSONA_TOPICS:
@@ -2074,7 +2138,7 @@ class Memory5(Star):
         recall_intent = any(word in text for word in RECALL_WORDS)
         picked = [
             e for e in important
-            if self._match(e, text, sender, strict_topic=True, recall_intent=recall_intent)
+            if self._match(e, text, sender, strict_topic=True, recall_intent=recall_intent, scope=scope)
             and not is_dup(str(e.get("text", "")))
         ]
         fallback_used = False
@@ -2082,15 +2146,14 @@ class Memory5(Star):
             candidates = []
             for e in important:
                 topic = str(e.get("topic", ""))
-                subject = str(e.get("subject"))
-                if subject != str(sender) and subject not in self._mentions(text):
+                if not self._subject_hit(e, text, sender, scope):
                     continue
                 if topic in SENSITIVE_TOPICS:
                     continue
                 hits = self._keyword_hits(e, text)
                 if not (self._topic_hit(topic, text) or hits):
                     continue
-                candidates.append((self._match_score(e, text, sender), str(e.get("date", "")), e))
+                candidates.append((self._match_score(e, text, sender, scope), str(e.get("date", "")), e))
             candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
             picked = [e for _score, _date, e in candidates if not is_dup(str(e.get("text", "")))][:3]
             fallback_used = bool(picked)
@@ -2149,13 +2212,13 @@ class Memory5(Star):
         for e in daily:
             tag = e.get("tag")
             if tag == "普通":
-                (matched if self._match(e, text, sender) else rest).append(e)
-            elif tag == "低密度" and str(e.get("date", "")) >= low_cutoff and self._match(e, text, sender):
+                (matched if self._match(e, text, sender, scope=scope) else rest).append(e)
+            elif tag == "低密度" and str(e.get("date", "")) >= low_cutoff and self._match(e, text, sender, scope=scope):
                 low.append(e)
         if not matched:
             fallback = [
                 e for e in daily
-                if e.get("tag") == "普通" and self._match_loose(e, text, sender)
+                if e.get("tag") == "普通" and self._match_loose(e, text, sender, scope)
             ]
             fallback.sort(key=lambda e: str(e.get("date", "")), reverse=True)
             matched = fallback[:3]
