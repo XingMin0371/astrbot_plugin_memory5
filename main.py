@@ -251,6 +251,7 @@ TOPIC_ALIASES = {
     "性格": ("性格", "脾气", "为人"),
 }
 RECALL_WORDS = ("还记得", "记不记得", "记得吗", "以前", "之前", "上次", "那次", "想起来", "回忆", "我说过", "答应过")
+CORE_ALWAYS_TOPICS = {"身份", "称呼", "关系", "底线", "保密", "私密", "主人", "权限", "管理员", "约定", "日记约定"}
 CORE_TOPIC_GROUPS = (
     ("主人", "身份", "称呼", "关系", "权限", "管理员"),
     ("底线", "保密", "私密", "原则"),
@@ -2085,6 +2086,19 @@ class Memory5(Star):
             rendered_core: list[str] = []
             for line in sorted(core.splitlines(), key=self._core_sort_key):
                 matched = CORE_LINE_RE.match(line.strip())
+                if matched:
+                    topic = matched.group("topic")
+                    always = topic in CORE_ALWAYS_TOPICS or "约定" in topic or any(
+                        word in topic for word in ("身份", "称呼", "关系", "底线", "保密", "私密", "主人", "权限", "管理员")
+                    )
+                    if not always:
+                        entry = {
+                            "topic": topic,
+                            "subject": matched.group("subject"),
+                            "text": matched.group("text"),
+                        }
+                        if not self._keyword_hits(entry, text):
+                            continue
                 is_dup(matched.group("text") if matched else line)
                 if not matched or not compact_memory or matched.group("topic") in PERSONA_TOPICS:
                     rendered_core.append(line)
