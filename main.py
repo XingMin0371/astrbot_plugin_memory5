@@ -262,6 +262,7 @@ GENERIC_KEYWORDS = {
     "这个", "那个", "没有", "就是", "还是", "因为", "所以", "如果", "然后", "已经", "自己",
     "知道", "觉得", "应该", "可能", "真的", "不是", "一样", "东西", "事情",
 }
+FALLBACK_IGNORE = {"查询", "查", "查一下", "看一下", "看看", "记得", "告诉", "说说", "一下", "什么", "怎么"}
 
 
 _SCOPE_RE = re.compile(r"^(group|private):[A-Za-z0-9_-]{1,64}$")
@@ -1925,6 +1926,9 @@ class Memory5(Star):
         norm = _norm_text(text)
         return [token for token in self._entry_keywords(entry) if token in norm]
 
+    def _specific_hits(self, entry: dict, text: str) -> list[str]:
+        return [token for token in self._keyword_hits(entry, text) if token not in FALLBACK_IGNORE]
+
     def _match(self, entry: dict, text: str, sender: str,
                strict_topic: bool = False, recall_intent: bool = False,
                scope: str = "") -> bool:
@@ -1950,10 +1954,7 @@ class Memory5(Star):
             return False
         if topic in SENSITIVE_TOPICS:
             return False
-        if not (self._topic_hit(topic, text)
-                or bool(topic and _norm_text(topic) in _norm_text(text))):
-            return False
-        return bool(self._keyword_hits(entry, text))
+        return bool(self._specific_hits(entry, text))
 
     def _match_score(self, entry: dict, text: str, sender: str, scope: str = "") -> int:
         topic = str(entry.get("topic", ""))
@@ -2151,10 +2152,7 @@ class Memory5(Star):
                     continue
                 if topic in SENSITIVE_TOPICS:
                     continue
-                hits = self._keyword_hits(e, text)
-                if not (self._topic_hit(topic, text)
-                        or any(len(token) >= 3 for token in hits)
-                        or len(hits) >= 2):
+                if not self._specific_hits(e, text):
                     continue
                 candidates.append((self._match_score(e, text, sender, scope), str(e.get("date", "")), e))
             candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
