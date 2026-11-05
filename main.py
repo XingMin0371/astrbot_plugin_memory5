@@ -2053,7 +2053,7 @@ class Memory5(Star):
         ]
         if recall_intent:
             picked.sort(key=lambda e: str(e.get("date", "")), reverse=True)
-            picked = picked[:8]
+            picked = picked[:6]
         important_cap = self._int_raw("important_max_chars", 0)
         if important_cap > 0:
             limited, used_chars = [], 0
