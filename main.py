@@ -230,6 +230,7 @@ CACHE_GUARD_MINUTES = 25
 CACHE_PREFIX_MESSAGES = 24
 PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
 SENSITIVE_TOPICS = {"私密", "亲密", "身体", "底线", "保密", "隐私", "密码"}
+CORE_ALWAYS_TOPICS = {"身份", "称呼", "关系", "底线", "保密", "私密", "主人", "权限", "管理员"}
 TOPIC_ALIASES = {
     "称呼": ("叫法", "名字", "怎么叫", "昵称", "外号"),
     "身份": ("身份", "是谁", "什么身份", "干什么的"),
@@ -1867,8 +1868,6 @@ class Memory5(Star):
             # Another person's memory only matches the exact topic; aliases and
             # keywords must not widen private-memory exposure.
             return bool(topic and _norm_text(topic) in _norm_text(text))
-        if not strict_topic:
-            return True
         if topic_hit:
             return True
         if topic in SENSITIVE_TOPICS:
@@ -1876,9 +1875,23 @@ class Memory5(Star):
         hits = self._keyword_hits(entry, text)
         # One short hit is usually a common word; require a specific hit or
         # two independent keyword hits. Recall intent no longer injects all.
-        if any(len(token) >= 3 for token in hits) or len(hits) >= 2:
-            return True
-        return False
+        return any(len(token) >= 3 for token in hits) or len(hits) >= 2
+
+    def _match_score(self, entry: dict, text: str, sender: str) -> int:
+        topic = str(entry.get("topic", ""))
+        subject = str(entry.get("subject"))
+        score = 0
+        if subject == str(sender) or subject in self._mentions(text):
+            score += 3
+        norm = _norm_text(text)
+        if topic and _norm_text(topic) in norm:
+            score += 3
+        elif self._topic_hit(topic, text):
+            score += 2
+        hits = self._keyword_hits(entry, text)
+        score += min(4, len(hits))
+        score += min(2, sum(1 for token in hits if len(token) >= 3))
+        return score
 
     def _meta_label(self, scope: str, qq: str) -> str:
         qq = str(qq or "").strip()
@@ -1994,6 +2007,19 @@ class Memory5(Star):
             rendered_core: list[str] = []
             for line in core.splitlines():
                 matched = CORE_LINE_RE.match(line.strip())
+                if matched:
+                    topic = matched.group("topic")
+                    always = topic in CORE_ALWAYS_TOPICS or any(
+                        word in topic for word in ("身份", "称呼", "关系", "底线", "保密", "主人", "权限", "管理员")
+                    )
+                    if not always:
+                        entry = {
+                            "topic": topic,
+                            "subject": matched.group("subject"),
+                            "text": matched.group("text"),
+                        }
+                        if not self._keyword_hits(entry, text):
+                            continue
                 is_dup(matched.group("text") if matched else line)
                 if not matched or not compact_memory or matched.group("topic") in PERSONA_TOPICS:
                     rendered_core.append(line)
@@ -2005,7 +2031,8 @@ class Memory5(Star):
                     f"- [{matched.group('topic')}] {matched.group('subject')} :: "
                     f"{body}（更新 {matched.group('date')}）"
                 )
-            chunks.append("【长期记忆】\n" + "\n".join(rendered_core))
+            if rendered_core:
+                chunks.append("【长期记忆】\n" + "\n".join(rendered_core))
 
         # 跨 scope 共享：只取能对上 QQ 的身份/称呼（各≤5），关系不限
         relevant = {str(sender)} | self._mentions(text)
@@ -2051,7 +2078,24 @@ class Memory5(Star):
             if self._match(e, text, sender, strict_topic=True, recall_intent=recall_intent)
             and not is_dup(str(e.get("text", "")))
         ]
-        if recall_intent:
+        fallback_used = False
+        if not picked:
+            candidates = []
+            for e in important:
+                topic = str(e.get("topic", ""))
+                subject = str(e.get("subject"))
+                if subject != str(sender) and subject not in self._mentions(text):
+                    continue
+                if topic in SENSITIVE_TOPICS:
+                    continue
+                hits = self._keyword_hits(e, text)
+                if not (self._topic_hit(topic, text) or hits):
+                    continue
+                candidates.append((self._match_score(e, text, sender), str(e.get("date", "")), e))
+            candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+            picked = [e for _score, _date, e in candidates if not is_dup(str(e.get("text", "")))][:3]
+            fallback_used = bool(picked)
+        if recall_intent and not fallback_used:
             picked.sort(key=lambda e: str(e.get("date", "")), reverse=True)
             picked = picked[:6]
         important_cap = self._int_raw("important_max_chars", 0)
