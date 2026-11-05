@@ -121,7 +121,7 @@
           },
           "important_max_chars": {
             "description": "重要上限（字符）",
-            "hint": "重要段的字符预算，0 表示不限制。",
+            "hint": "当前消息命中的重要记忆最多注入多少字符；0 表示不限制。",
             "type": "int",
             "default": 0
           }
@@ -192,7 +192,7 @@
       "tool_context_compress": {
         "description": "工具循环上下文压缩",
         "type": "bool",
-        "default": false,
+        "default": true,
         "hint": "关闭后其他插件进行工具消息控制。"
       },
       "tool_context_trigger_chars": {
@@ -258,7 +258,8 @@
       "tool_context_placeholder": {
         "description": "旧工具结果占位符",
         "type": "string",
-        "default": "[工具结果已压缩]"
+        "default": "[工具结果已压缩]",
+        "hint": "工具结果被压缩后的占位文本；默认 [工具结果已压缩]。"
       }
     }
   },
@@ -534,14 +535,16 @@
       "gate_debounce_ms": {
         "description": "消息防抖毫秒",
         "type": "int",
-        "default": 1200
+        "default": 1200,
+        "hint": "同一发送者连续消息合并的防抖时间，默认 1200 毫秒。"
       },
       "gate_names": {
         "description": "名字触发词",
         "type": "list",
         "default": [
           "鱼鱼"
-        ]
+        ],
+        "hint": "触发判读的名字/称呼列表。"
       },
       "gate_random_reply_enabled": {
         "description": "低频随机回复",
@@ -588,12 +591,14 @@
       "cold_cache_seconds": {
         "description": "冷群缓存有效秒数",
         "type": "int",
-        "default": 900
+        "default": 900,
+        "hint": "冷群缓存保留时间，默认 900 秒。"
       },
       "cold_cache_max_messages": {
         "description": "冷群缓存消息上限",
         "type": "int",
-        "default": 20
+        "default": 20,
+        "hint": "冷群缓存最多保留消息数，默认 20。"
       },
       "gate_batch_max_messages": {
         "description": "单次合并消息上限",
@@ -730,7 +735,8 @@
       "index_snapshot_ttl_seconds": {
         "description": "索引快照刷新秒数",
         "type": "int",
-        "default": 10800
+        "default": 10800,
+        "hint": "长期索引快照缓存时间，默认 10800 秒。"
       },
       "artifact_retention_days": {
         "description": "工具归档保留天数",
