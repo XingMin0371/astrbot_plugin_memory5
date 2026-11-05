@@ -241,7 +241,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.6.7"
+VERSION = "2.6.8"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -2553,8 +2553,7 @@ class Memory5(Star):
             dynamic = block[split_at:].strip()
             if stable:
                 stable_text = MEMORY_SAFE_HEADER + _sanitize_memory_text(stable) + MEMORY_SAFE_FOOTER
-                base_prompt = str(getattr(req, "system_prompt", "") or "")
-                req.system_prompt = (base_prompt + "\n\n" + stable_text).strip()
+                _append_no_save_context(req, stable_text, "end")
             if dynamic or meta:
                 dynamic_text = dynamic
                 if meta:
