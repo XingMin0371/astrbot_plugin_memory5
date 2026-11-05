@@ -230,8 +230,7 @@ CACHE_GUARD_MINUTES = 25
 CACHE_PREFIX_MESSAGES = 24
 PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
 SENSITIVE_TOPICS = {"私密", "亲密", "身体", "底线", "保密", "隐私", "密码"}
-CORE_ALWAYS_TOPICS = {"身份", "称呼", "关系", "底线", "保密", "私密", "主人", "权限", "管理员"}
-CORE_EXCLUDED_TOPICS = {"约定"}
+
 TOPIC_ALIASES = {
     "称呼": ("叫法", "名字", "怎么叫", "昵称", "外号"),
     "身份": ("身份", "是谁", "什么身份", "干什么的"),
@@ -2020,10 +2019,6 @@ class Memory5(Star):
             rendered_core: list[str] = []
             for line in core.splitlines():
                 matched = CORE_LINE_RE.match(line.strip())
-                if matched:
-                    topic = matched.group("topic")
-                    if topic in CORE_EXCLUDED_TOPICS:
-                        continue
                 is_dup(matched.group("text") if matched else line)
                 if not matched or not compact_memory or matched.group("topic") in PERSONA_TOPICS:
                     rendered_core.append(line)
