@@ -241,7 +241,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.6.2"
+VERSION = "2.6.3"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -2062,7 +2062,8 @@ class Memory5(Star):
         if not isinstance(contexts, list):
             return 0
         prefix, _ = self._cache_protection()
-        recent_start = max(0, len(contexts) - 30)
+        keep_turns = max(1, self._int("keep_recent_turns", 15, 1))
+        recent_start = max(prefix, self._recent_user_start(contexts, keep_turns))
         seen = seen or {}
         kept, removed = [], 0
         for idx, item in enumerate(contexts):
