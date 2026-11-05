@@ -1853,9 +1853,9 @@ class Memory5(Star):
         norm = _norm_text(text)
         return any(_norm_text(term) and _norm_text(term) in norm for term in self._topic_terms(topic))
 
-    def _keyword_hit(self, entry: dict, text: str) -> bool:
+    def _keyword_hits(self, entry: dict, text: str) -> list[str]:
         norm = _norm_text(text)
-        return any(token in norm for token in self._entry_keywords(entry))
+        return [token for token in self._entry_keywords(entry) if token in norm]
 
     def _match(self, entry: dict, text: str, sender: str,
                strict_topic: bool = False, recall_intent: bool = False) -> bool:
@@ -1873,12 +1873,12 @@ class Memory5(Star):
             return True
         if topic in SENSITIVE_TOPICS:
             return False
-        if self._keyword_hit(entry, text):
+        hits = self._keyword_hits(entry, text)
+        # One short hit is usually a common word; require a specific hit or
+        # two independent keyword hits. Recall intent no longer injects all.
+        if any(len(token) >= 3 for token in hits) or len(hits) >= 2:
             return True
-        if recall_intent:
-            return True
-        # Identity/relationship facts remain available when topic is implicit.
-        return bool(topic and topic in PERSONA_TOPICS)
+        return False
 
     def _meta_label(self, scope: str, qq: str) -> str:
         qq = str(qq or "").strip()
