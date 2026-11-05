@@ -241,7 +241,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.6.0"
+VERSION = "2.6.1"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -981,6 +981,7 @@ class Memory5(Star):
         self._cold_cache: dict[str, deque] = {}
         self._index_snapshot: dict[str, tuple[str, float]] = {}
         self._last_request_at: dict[str, float] = {}
+        self._last_maintenance_at: dict[str, float] = {}
         self._context_seen_at: dict[str, dict[str, float]] = {}
         self._tool_seen_at: dict[str, dict[str, float]] = {}
         self._ambient_last: dict[tuple[str, str], float] = {}
@@ -2434,7 +2435,13 @@ class Memory5(Star):
             _, guard = self._cache_protection()
             previous = self._last_request_at.get(scope, 0) if scope else 0
             maintenance_idle = max(1, self._int("maintenance_idle_minutes", 10, 1))
-            allow_cleanup = not previous or now - previous >= maintenance_idle * 60
+            allow_cleanup = (
+                not previous
+                or now - previous >= maintenance_idle * 60
+                or now - self._last_maintenance_at.get(scope or "", 0) >= 60 * 60
+            )
+            if allow_cleanup:
+                self._last_maintenance_at[scope or ""] = now
             placeholder_due = allow_cleanup
             if scope:
                 self._last_request_at[scope] = now

@@ -46,12 +46,6 @@
           "纽约（America/New_York）"
         ],
         "default": "北京时间（Asia/Shanghai）"
-      },
-      "cache_friendly": {
-        "description": "缓存友好注入",
-        "hint": "默认开启：不改写历史前缀，把记忆放在当前用户消息前部，尽量保留上游 Prompt Cache，并提高记忆显著性。",
-        "type": "bool",
-        "default": true
       }
     }
   },
