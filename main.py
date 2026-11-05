@@ -241,7 +241,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.6.4"
+VERSION = "2.6.5"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -1552,22 +1552,56 @@ class Memory5(Star):
         return
 
     # --------------------------------------------------------- core memory
+    SYNTHETIC_FLAGS = ("_no_save", "_synthetic", "synthetic", "is_system", "is_plugin")
+    _PLACEHOLDER_ONLY_RE = re.compile(r"^(?:\s*(?:\[[^\]]*\]|<[^>]*>|【[^】]*】)\s*)+$")
+
+    @classmethod
+    def _is_synthetic_context(cls, item) -> bool:
+        if not isinstance(item, dict):
+            return False
+        if any(bool(item.get(k)) for k in cls.SYNTHETIC_FLAGS):
+            return True
+        source = str(item.get("source") or item.get("origin") or "").strip().lower()
+        return source in {"plugin", "system", "synthetic"}
+
+    @classmethod
+    def _is_unknown_placeholder_context(cls, item) -> bool:
+        if not isinstance(item, dict) or item.get("role") not in {"user", "assistant"}:
+            return False
+        text = cls._context_text_static(item).strip()
+        return bool(text) and bool(cls._PLACEHOLDER_ONLY_RE.match(text))
+
     @staticmethod
-    def _real_prefix_end(contexts: list, prefix_count: int) -> int:
+    def _context_text_static(item) -> str:
+        content = item.get("content") if isinstance(item, dict) else ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "\n".join(
+                str(part.get("text", ""))
+                for part in content
+                if isinstance(part, dict) and part.get("type") in {"text", "plain"}
+            )
+        return ""
+
+    @classmethod
+    def _real_prefix_end(cls, contexts: list, prefix_count: int) -> int:
         prefix_count = max(0, int(prefix_count))
         if prefix_count <= 0:
             return 0
         seen = 0
         for idx, item in enumerate(contexts):
-            if not isinstance(item, dict) or item.get("_no_save"):
+            if (not isinstance(item, dict)
+                    or cls._is_synthetic_context(item)
+                    or cls._is_unknown_placeholder_context(item)):
                 continue
             seen += 1
             if seen >= prefix_count:
                 return idx + 1
         return len(contexts)
 
-    @staticmethod
-    def _recent_user_start(contexts: list, keep_turns: int) -> int:
+    @classmethod
+    def _recent_user_start(cls, contexts: list, keep_turns: int) -> int:
         keep_turns = max(0, int(keep_turns))
         if keep_turns <= 0:
             return len(contexts)
@@ -1576,7 +1610,9 @@ class Memory5(Star):
             item = contexts[idx]
             if not isinstance(item, dict):
                 continue
-            if item.get("role") != "user" or item.get("_no_save"):
+            if item.get("role") != "user":
+                continue
+            if cls._is_synthetic_context(item) or cls._is_unknown_placeholder_context(item):
                 continue
             seen += 1
             if seen >= keep_turns:
@@ -1720,6 +1756,9 @@ class Memory5(Star):
             if text:
                 text = self._normalize_compare(self._normalize_time(text))
             if seen and seen.get(f"{idx}:{self._context_key(item)}", seen_cutoff) >= seen_cutoff:
+                kept.append(item)
+                continue
+            if self._is_synthetic_context(item) or self._is_unknown_placeholder_context(item):
                 kept.append(item)
                 continue
             if (idx >= prefix and idx < recent_start
@@ -2086,6 +2125,9 @@ class Memory5(Star):
         for idx, item in enumerate(contexts):
             text = self._context_text(item) if isinstance(item, dict) else ""
             if seen and seen.get(f"{idx}:{self._context_key(item)}", seen_cutoff) >= seen_cutoff:
+                kept.append(item)
+                continue
+            if self._is_synthetic_context(item) or self._is_unknown_placeholder_context(item):
                 kept.append(item)
                 continue
             if (idx >= prefix and idx < recent_start and text
