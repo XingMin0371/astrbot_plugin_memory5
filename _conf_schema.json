@@ -231,11 +231,11 @@
         "default": 6,
         "hint": "过期池或全部池累计达到该条数才统一清理；默认 6。"
       },
-      "tool_context_cooldown_minutes": {
-        "description": "工具压缩冷却（分钟）",
+      "maintenance_idle_minutes": {
+        "description": "统一维护空闲分钟",
         "type": "int",
         "default": 10,
-        "hint": "工具结果压缩成功后，多少分钟内不再压缩；默认 10，推荐 5–15。"
+        "hint": "工具池/占位符/低密度/待清理只在空闲达到该分钟数后统一执行；默认 10，推荐 5–15。"
       },
       "placeholder_max_messages": {
         "description": "占位符批量清理条数",
@@ -248,12 +248,6 @@
         "type": "int",
         "default": 3,
         "hint": "占位符消息超过该天数时清理整条消息；默认 3。"
-      },
-      "placeholder_idle_minutes": {
-        "description": "占位符清理空闲分钟",
-        "type": "int",
-        "default": 10,
-        "hint": "距离上次请求达到该分钟数才执行占位符清理；默认 10，推荐 5–15。"
       },
       "tool_context_max_chars": {
         "description": "工具结果总字符预算",

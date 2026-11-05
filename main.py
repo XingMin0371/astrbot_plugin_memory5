@@ -227,7 +227,6 @@ DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
 TZ = timezone(timedelta(hours=8))
 # Internal cache protection; intentionally not exposed as separate settings.
 CACHE_GUARD_MINUTES = 25
-TOOL_CONTEXT_COOLDOWN_MINUTES = 10
 CACHE_PREFIX_MESSAGES = 24
 PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
 
@@ -242,7 +241,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.5.3"
+VERSION = "2.6.0"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -984,7 +983,6 @@ class Memory5(Star):
         self._last_request_at: dict[str, float] = {}
         self._context_seen_at: dict[str, dict[str, float]] = {}
         self._tool_seen_at: dict[str, dict[str, float]] = {}
-        self._tool_compress_last_at: dict[str, float] = {}
         self._ambient_last: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
@@ -2354,10 +2352,9 @@ class Memory5(Star):
                    if isinstance(m, dict) and m.get("role") == "tool"]
         if not indices:
             return 0
-        now = time.time()
-        cooldown_minutes = max(1, self._int("tool_context_cooldown_minutes", TOOL_CONTEXT_COOLDOWN_MINUTES, 1))
-        if now - self._tool_compress_last_at.get(scope or "", 0) < cooldown_minutes * 60:
+        if not allow_cleanup:
             return 0
+        now = time.time()
         prefix, guard = self._cache_protection()
         cutoff = now - guard * 60
         seen = self._tool_seen_at.setdefault(scope or "", {})
@@ -2423,7 +2420,6 @@ class Memory5(Star):
         if not expired_handled and len(all_pool) >= batch and sum(size(i) for i in all_pool) >= normal_trigger:
             changed += compress(all_pool, normal_budget)
         if changed:
-            self._tool_compress_last_at[scope or ""] = now
             logger.info(
                 f"memory5: tool context compressed {changed} results "
                 f"(expired={len(expired)}, all={len(all_pool)}, batch={batch})"
@@ -2437,9 +2433,9 @@ class Memory5(Star):
             now = time.time()
             _, guard = self._cache_protection()
             previous = self._last_request_at.get(scope, 0) if scope else 0
-            allow_cleanup = not previous or now - previous >= guard * 60
-            placeholder_idle = max(1, self._int("placeholder_idle_minutes", 10, 1))
-            placeholder_due = not previous or now - previous >= placeholder_idle * 60
+            maintenance_idle = max(1, self._int("maintenance_idle_minutes", 10, 1))
+            allow_cleanup = not previous or now - previous >= maintenance_idle * 60
+            placeholder_due = allow_cleanup
             if scope:
                 self._last_request_at[scope] = now
             contexts = getattr(req, "contexts", None)
