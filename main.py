@@ -241,7 +241,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.6.1"
+VERSION = "2.6.2"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -1553,13 +1553,30 @@ class Memory5(Star):
 
     # --------------------------------------------------------- core memory
     @staticmethod
+    def _recent_user_start(contexts: list, keep_turns: int) -> int:
+        keep_turns = max(0, int(keep_turns))
+        if keep_turns <= 0:
+            return len(contexts)
+        seen = 0
+        for idx in range(len(contexts) - 1, -1, -1):
+            item = contexts[idx]
+            if not isinstance(item, dict):
+                continue
+            if item.get("role") != "user" or item.get("_no_save"):
+                continue
+            seen += 1
+            if seen >= keep_turns:
+                return idx
+        return 0
+
+    @staticmethod
     def _context_key(message: Any) -> str:
         return hashlib.sha1(str(message).encode("utf-8", "ignore")).hexdigest()
 
     def _mark_context_seen(self, scope: str, contexts: list, now: float) -> tuple[dict[str, float], float]:
         prefix, guard = self._cache_protection()
-        recent_n = max(1, self._int("keep_recent_turns", 15, 1)) * 2
-        recent_start = max(prefix, len(contexts) - recent_n)
+        keep_turns = max(1, self._int("keep_recent_turns", 15, 1))
+        recent_start = max(prefix, self._recent_user_start(contexts, keep_turns))
         seen = self._context_seen_at.setdefault(scope or "", {})
         cutoff = now - guard * 60
         for idx, item in enumerate(contexts):
@@ -1678,8 +1695,8 @@ class Memory5(Star):
             return 0
         kept = []
         removed = 0
-        recent = max(0, self._int("keep_recent_turns", 15, 0)) * 2
-        recent_start = max(0, len(contexts) - recent)
+        keep_turns = max(0, self._int("keep_recent_turns", 15, 0))
+        recent_start = self._recent_user_start(contexts, keep_turns)
         prefix, _ = self._cache_protection()
         seen = seen or {}
         for idx, item in enumerate(contexts):
@@ -2285,8 +2302,8 @@ class Memory5(Star):
         if not isinstance(contexts, list):
             return 0
         prefix, _ = self._cache_protection()
-        keep = max(1, self._int("keep_recent_turns", 15, 1)) * 2
-        recent_start = max(prefix, len(contexts) - keep)
+        keep = max(1, self._int("keep_recent_turns", 15, 1))
+        recent_start = max(prefix, self._recent_user_start(contexts, keep))
         max_count = max(1, self._int("placeholder_max_messages", 30, 1))
         max_days = max(1, self._int("placeholder_max_days", 3, 1))
         candidates = []
