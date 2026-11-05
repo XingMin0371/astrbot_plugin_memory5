@@ -240,7 +240,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -980,6 +980,8 @@ class Memory5(Star):
         self._cold_cache: dict[str, deque] = {}
         self._index_snapshot: dict[str, tuple[str, float]] = {}
         self._last_request_at: dict[str, float] = {}
+        self._context_seen_at: dict[str, dict[str, float]] = {}
+        self._tool_seen_at: dict[str, dict[str, float]] = {}
         self._ambient_last: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
@@ -1548,6 +1550,25 @@ class Memory5(Star):
         return
 
     # --------------------------------------------------------- core memory
+    @staticmethod
+    def _context_key(message: Any) -> str:
+        return hashlib.sha1(str(message).encode("utf-8", "ignore")).hexdigest()
+
+    def _mark_context_seen(self, scope: str, contexts: list, now: float) -> tuple[dict[str, float], float]:
+        prefix, guard = self._cache_protection()
+        recent_n = max(1, self._int("keep_recent_turns", 15, 1)) * 2
+        recent_start = max(prefix, len(contexts) - recent_n)
+        seen = self._context_seen_at.setdefault(scope or "", {})
+        cutoff = now - guard * 60
+        for idx, item in enumerate(contexts):
+            key = f"{idx}:{self._context_key(item)}"
+            if key not in seen:
+                seen[key] = cutoff - 1 if prefix <= idx < recent_start else now
+        if len(seen) > 1000:
+            for key in list(seen)[:len(seen) - 1000]:
+                seen.pop(key, None)
+        return seen, cutoff
+
     def _cache_protection(self) -> tuple[int, int]:
         """Use own settings, but never weaker than an installed companion."""
         prefix = max(0, self._int_raw("cache_prefix_messages", CACHE_PREFIX_MESSAGES))
@@ -1629,7 +1650,8 @@ class Memory5(Star):
             return "".join(parts).strip()
         return ""
 
-    def _clean_context_low(self, req, scope: str, allow_cleanup: bool = True) -> int:
+    def _clean_context_low(self, req, scope: str, allow_cleanup: bool = True,
+                           seen: dict[str, float] | None = None, seen_cutoff: float = 0.0) -> int:
         """Idle-only low-density cleanup; never touch the stable cache prefix."""
         if not allow_cleanup or not bool(self._get("low_context_clean", True)):
             return 0
@@ -1657,10 +1679,14 @@ class Memory5(Star):
         recent = max(0, self._int("keep_recent_turns", 15, 0)) * 2
         recent_start = max(0, len(contexts) - recent)
         prefix, _ = self._cache_protection()
+        seen = seen or {}
         for idx, item in enumerate(contexts):
             text = self._context_text(item) if isinstance(item, dict) else ""
             if text:
                 text = self._normalize_compare(self._normalize_time(text))
+            if seen and seen.get(f"{idx}:{self._context_key(item)}", seen_cutoff) >= seen_cutoff:
+                kept.append(item)
+                continue
             if (idx >= prefix and idx < recent_start
                     and text and text in low_text):
                 removed += 1
@@ -2008,7 +2034,8 @@ class Memory5(Star):
             parts_out.append(remind_chunk)
         return "\n\n".join(parts_out)
 
-    def _clean_pending_context(self, req, allow_cleanup: bool = True) -> int:
+    def _clean_pending_context(self, req, allow_cleanup: bool = True, scope: str = "",
+                               seen: dict[str, float] | None = None, seen_cutoff: float = 0.0) -> int:
         pending = getattr(self, "_pending_context_clean", None)
         if not allow_cleanup or not pending:
             return 0
@@ -2017,9 +2044,13 @@ class Memory5(Star):
             return 0
         prefix, _ = self._cache_protection()
         recent_start = max(0, len(contexts) - 30)
+        seen = seen or {}
         kept, removed = [], 0
         for idx, item in enumerate(contexts):
             text = self._context_text(item) if isinstance(item, dict) else ""
+            if seen and seen.get(f"{idx}:{self._context_key(item)}", seen_cutoff) >= seen_cutoff:
+                kept.append(item)
+                continue
             if (idx >= prefix and idx < recent_start and text
                     and self._normalize_compare(self._normalize_time(text)) in pending):
                 removed += 1
@@ -2263,12 +2294,21 @@ class Memory5(Star):
         keep = max(3, self._int("tool_context_keep_results", 25, 1))
         if allow_cleanup:
             keep = max(3, self._int("tool_context_idle_keep_results", 15, 1))
-        prefix, _ = self._cache_protection()
+        prefix, guard = self._cache_protection()
+        now = time.time()
+        cutoff = now - guard * 60
+        seen = self._tool_seen_at.setdefault(scope or "", {})
+        seen_idx = {}
+        for i in indices:
+            key = f"{i}:" + hashlib.sha1(str(contexts[i].get("content", "")).encode("utf-8", "ignore")).hexdigest()
+            if key not in seen:
+                seen[key] = cutoff - 1
+            seen_idx[i] = seen[key]
         old = indices[:-keep]
         soft = indices[-keep:-3]
-        candidates = [i for i in old + soft if i >= prefix]
+        candidates = [i for i in old + soft if i >= prefix and seen_idx.get(i, 0) < cutoff]
         if recent_used >= recent_limit:
-            candidates += [i for i in recent if i >= prefix]
+            candidates += [i for i in recent if i >= prefix and seen_idx.get(i, 0) < cutoff]
         placeholder = str(self._get("tool_context_placeholder", "[工具结果已压缩]"))
         changed = 0
         for i in candidates:
@@ -2296,13 +2336,15 @@ class Memory5(Star):
             allow_cleanup = not previous or now - previous >= guard * 60
             if scope:
                 self._last_request_at[scope] = now
+            contexts = getattr(req, "contexts", None)
+            seen_ctx, cutoff = self._mark_context_seen(scope or "", contexts if isinstance(contexts, list) else [], now)
             self._trim_tool_context(req, allow_cleanup, scope or "")
             cache_friendly = bool(self._get("cache_friendly", True))
             # Archive-triggered pending cleanup is the original behavior.
             # Only the low-density context cleanup has its own switch.
-            self._clean_pending_context(req, allow_cleanup)
+            self._clean_pending_context(req, allow_cleanup, scope or "", seen_ctx, cutoff)
             if bool(self._get("low_context_clean", True)) and scope:
-                self._clean_context_low(req, scope, allow_cleanup)
+                self._clean_context_low(req, scope, allow_cleanup, seen_ctx, cutoff)
             if not self.enabled_inject:
                 return
             if not scope:
