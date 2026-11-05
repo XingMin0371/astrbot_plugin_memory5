@@ -229,6 +229,31 @@ TZ = timezone(timedelta(hours=8))
 CACHE_GUARD_MINUTES = 25
 CACHE_PREFIX_MESSAGES = 24
 PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
+SENSITIVE_TOPICS = {"私密", "亲密", "身体", "底线", "保密", "隐私", "密码"}
+TOPIC_ALIASES = {
+    "称呼": ("叫法", "名字", "怎么叫", "昵称", "外号"),
+    "身份": ("身份", "是谁", "什么身份", "干什么的"),
+    "关系": ("关系", "什么关系", "认识", "怎么称呼"),
+    "喜好": ("喜欢", "爱吃", "偏好", "爱好", "讨厌"),
+    "偏好": ("喜欢", "爱吃", "偏好", "爱好"),
+    "习惯": ("习惯", "经常", "总是", "平时"),
+    "作息": ("睡觉", "起床", "作息", "熬夜", "几点睡"),
+    "约定": ("答应", "说好", "约好", "以后", "承诺"),
+    "提醒": ("提醒", "记得", "别忘了", "到点"),
+    "归档": ("归档", "整理", "记忆", "日记"),
+    "查询": ("查询", "查", "联网", "搜索", "看一下"),
+    "底线": ("底线", "不可以", "禁止", "别", "不能"),
+    "保密": ("保密", "私密", "不能说", "别告诉", "秘密"),
+    "私密": ("私密", "亲密", "身体", "不能对外说"),
+    "事件": ("事件", "发生", "那次", "当时"),
+    "性格": ("性格", "脾气", "为人"),
+}
+RECALL_WORDS = ("还记得", "记不记得", "记得吗", "以前", "之前", "上次", "那次", "想起来", "回忆", "我说过", "答应过")
+GENERIC_KEYWORDS = {
+    "今天", "昨天", "明天", "现在", "时候", "什么", "怎么", "可以", "一个", "我们", "他们",
+    "这个", "那个", "没有", "就是", "还是", "因为", "所以", "如果", "然后", "已经", "自己",
+    "知道", "觉得", "应该", "可能", "真的", "不是", "一样", "东西", "事情",
+}
 
 
 _SCOPE_RE = re.compile(r"^(group|private):[A-Za-z0-9_-]{1,64}$")
@@ -1805,16 +1830,55 @@ class Memory5(Star):
     def _mentions(text: str) -> set[str]:
         return set(re.findall(r"\d{5,12}", text or ""))
 
-    def _match(self, entry: dict, text: str, sender: str, strict_topic: bool = False) -> bool:
+    @staticmethod
+    def _topic_terms(topic: str) -> list[str]:
+        topic = str(topic or "").strip()
+        terms = [topic]
+        terms.extend(TOPIC_ALIASES.get(topic, ()))
+        return [t for t in dict.fromkeys(terms) if t]
+
+    @staticmethod
+    def _entry_keywords(entry: dict) -> list[str]:
+        raw = re.sub(r"\d{5,12}", " ", f"{entry.get('topic', '')} {entry.get('text', '')}")
+        words = set()
+        for segment in re.findall(r"[\u4e00-\u9fff]{2,}", raw):
+            for size in (2, 3, 4):
+                for idx in range(0, max(0, len(segment) - size + 1)):
+                    token = segment[idx:idx + size]
+                    if token not in GENERIC_KEYWORDS:
+                        words.add(token)
+        return sorted(words, key=len, reverse=True)[:60]
+
+    def _topic_hit(self, topic: str, text: str) -> bool:
+        norm = _norm_text(text)
+        return any(_norm_text(term) and _norm_text(term) in norm for term in self._topic_terms(topic))
+
+    def _keyword_hit(self, entry: dict, text: str) -> bool:
+        norm = _norm_text(text)
+        return any(token in norm for token in self._entry_keywords(entry))
+
+    def _match(self, entry: dict, text: str, sender: str,
+               strict_topic: bool = False, recall_intent: bool = False) -> bool:
         topic = str(entry.get("topic", ""))
         subject = str(entry.get("subject"))
-        if subject == str(sender) or subject in self._mentions(text):
-            if strict_topic:
-                # Identity/relationship facts stay available; other important
-                # facts need a topic hit so unrelated private details do not leak.
-                return bool(topic and (topic in text or topic in PERSONA_TOPICS))
+        subject_hit = subject == str(sender) or subject in self._mentions(text)
+        topic_hit = self._topic_hit(topic, text)
+        if not subject_hit:
+            # Another person's memory only matches the exact topic; aliases and
+            # keywords must not widen private-memory exposure.
+            return bool(topic and _norm_text(topic) in _norm_text(text))
+        if not strict_topic:
             return True
-        return bool(topic and topic in text)
+        if topic_hit:
+            return True
+        if topic in SENSITIVE_TOPICS:
+            return False
+        if self._keyword_hit(entry, text):
+            return True
+        if recall_intent:
+            return True
+        # Identity/relationship facts remain available when topic is implicit.
+        return bool(topic and topic in PERSONA_TOPICS)
 
     def _meta_label(self, scope: str, qq: str) -> str:
         qq = str(qq or "").strip()
@@ -1981,7 +2045,15 @@ class Memory5(Star):
 
         # 重要：匹配当前消息的条目全放（总量由预算兜底），已在长期记忆里的跳过
         important = read_jsonl(scope_paths(scope)["important"])
-        picked = [e for e in important if self._match(e, text, sender, strict_topic=True) and not is_dup(str(e.get("text", "")))]
+        recall_intent = any(word in text for word in RECALL_WORDS)
+        picked = [
+            e for e in important
+            if self._match(e, text, sender, strict_topic=True, recall_intent=recall_intent)
+            and not is_dup(str(e.get("text", "")))
+        ]
+        if recall_intent:
+            picked.sort(key=lambda e: str(e.get("date", "")), reverse=True)
+            picked = picked[:8]
         important_cap = self._int_raw("important_max_chars", 0)
         if important_cap > 0:
             limited, used_chars = [], 0
