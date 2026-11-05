@@ -25,6 +25,7 @@ import time
 import urllib.request
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from astrbot.api import logger
@@ -225,7 +226,8 @@ def _append_no_save_context(req, text: str, position: str = "end") -> bool:
 DB_PATH = os.path.join(DATA_DIR, "data_v4.db")
 TZ = timezone(timedelta(hours=8))
 # Internal cache protection; intentionally not exposed as separate settings.
-CACHE_GUARD_MINUTES = 75
+CACHE_GUARD_MINUTES = 25
+TOOL_CONTEXT_COOLDOWN_MINUTES = 10
 CACHE_PREFIX_MESSAGES = 24
 PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
 
@@ -240,7 +242,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.4.1"
+VERSION = "2.5.3"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -982,6 +984,7 @@ class Memory5(Star):
         self._last_request_at: dict[str, float] = {}
         self._context_seen_at: dict[str, dict[str, float]] = {}
         self._tool_seen_at: dict[str, dict[str, float]] = {}
+        self._tool_compress_last_at: dict[str, float] = {}
         self._ambient_last: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
@@ -2269,33 +2272,93 @@ class Memory5(Star):
         available = "是" if data.get("is_available") else "否"
         return f"可用：{available}\n" + "\n".join(lines)
 
+    @staticmethod
+    def _is_placeholder_text(text: str) -> bool:
+        text = (text or "").strip()
+        if not text:
+            return False
+        text = text.replace("[工具结果已压缩]", "")
+        text = re.sub(r"\[工具结果已归档:[^\]]*\]", "", text)
+        return not text.strip()
+
+    def _remove_placeholder_context(self, req, scope: str, seen: dict[str, float], now: float) -> int:
+        contexts = getattr(req, "contexts", None)
+        if not isinstance(contexts, list):
+            return 0
+        prefix, _ = self._cache_protection()
+        keep = max(1, self._int("keep_recent_turns", 15, 1)) * 2
+        recent_start = max(prefix, len(contexts) - keep)
+        max_count = max(1, self._int("placeholder_max_messages", 30, 1))
+        max_days = max(1, self._int("placeholder_max_days", 3, 1))
+        candidates = []
+        old = []
+        first_seen: dict[int, float] = {}
+        for idx, item in enumerate(contexts):
+            if idx < prefix or idx >= recent_start or not isinstance(item, dict):
+                continue
+            if item.get("role") not in {"user", "assistant", "tool"}:
+                continue
+            text = self._context_text(item)
+            if not self._is_placeholder_text(text):
+                continue
+            key = f"{idx}:{self._context_key(item)}"
+            first = seen.get(key, now)
+            first_seen[idx] = first
+            candidates.append(idx)
+            if now - first >= max_days * 86400:
+                old.append(idx)
+        if not candidates or (len(candidates) <= max_count and not old):
+            return 0
+        if old:
+            day_groups: dict[str, list[int]] = {}
+            for idx in old:
+                day = time.strftime("%Y-%m-%d", time.localtime(first_seen[idx]))
+                day_groups.setdefault(day, []).append(idx)
+            drop = set(day_groups[min(day_groups)])
+        else:
+            drop = set(candidates[:max_count])
+        # Remove matching tool_calls when a placeholder tool result is dropped.
+        for idx in list(drop):
+            item = contexts[idx]
+            if item.get("role") != "tool":
+                continue
+            cid = str(item.get("tool_call_id") or "")
+            if not cid:
+                continue
+            for ai, assistant in enumerate(contexts):
+                if not isinstance(assistant, dict) or assistant.get("role") != "assistant":
+                    continue
+                calls = assistant.get("tool_calls") or []
+                if not calls:
+                    continue
+                kept = [c for c in calls if str(c.get("id") or c.get("tool_call_id") or "") != cid]
+                if len(kept) == len(calls):
+                    continue
+                assistant["tool_calls"] = kept
+                if not kept and not self._context_text(assistant).strip():
+                    drop.add(ai)
+        kept = [m for i, m in enumerate(contexts) if i not in drop]
+        if len(kept) != len(contexts):
+            req.contexts = kept
+            logger.info(f"memory5: placeholder GC {len(contexts) - len(kept)} messages")
+        return len(contexts) - len(kept)
+
     def _trim_tool_context(self, req, allow_cleanup: bool, scope: str = "") -> int:
-        """Trim old tool results; recent 3 are a hard floor unless oversized."""
+        """Two pools: expired uses half cap, unexpired uses normal cap."""
         if not bool(self._get("tool_context_compress", True)):
             return 0
         contexts = getattr(req, "contexts", None)
         if not isinstance(contexts, list):
             return 0
-        trigger = max(10000, self._int("tool_context_trigger_chars", 48000, 10000))
-        budget = max(4000, self._int("tool_context_max_chars", 24000, 4000))
         indices = [i for i, m in enumerate(contexts)
                    if isinstance(m, dict) and m.get("role") == "tool"]
-        used = sum(len(str(contexts[i].get("content", ""))) for i in indices)
-        recent = indices[-3:]
-        recent_used = sum(len(str(contexts[i].get("content", ""))) for i in recent)
-        recent_limit = budget * 2.05
-        emergency_threshold = max(budget * 2.5, trigger * 1.5)
-        # 触发口径只看工具结果，不看整个上下文。
-        emergency = used >= emergency_threshold or recent_used >= recent_limit
-        if not (allow_cleanup or emergency):
+        if not indices:
             return 0
-        if used < trigger and not emergency:
-            return 0
-        keep = max(3, self._int("tool_context_keep_results", 25, 1))
-        if allow_cleanup:
-            keep = max(3, self._int("tool_context_idle_keep_results", 15, 1))
-        prefix, guard = self._cache_protection()
         now = time.time()
+        cooldown_minutes = max(1, self._int("tool_context_cooldown_minutes", TOOL_CONTEXT_COOLDOWN_MINUTES, 1))
+        if now - self._tool_compress_last_at.get(scope or "", 0) < cooldown_minutes * 60:
+            return 0
+        prefix, guard = self._cache_protection()
         cutoff = now - guard * 60
         seen = self._tool_seen_at.setdefault(scope or "", {})
         seen_idx = {}
@@ -2304,26 +2367,67 @@ class Memory5(Star):
             if key not in seen:
                 seen[key] = cutoff - 1
             seen_idx[i] = seen[key]
-        old = indices[:-keep]
-        soft = indices[-keep:-3]
-        candidates = [i for i in old + soft if i >= prefix and seen_idx.get(i, 0) < cutoff]
-        if recent_used >= recent_limit:
-            candidates += [i for i in recent if i >= prefix and seen_idx.get(i, 0) < cutoff]
-        placeholder = str(self._get("tool_context_placeholder", "[工具结果已压缩]"))
+        active_keep = max(3, self._int("tool_context_keep_results", 12, 1))
+        idle_keep = max(3, self._int("tool_context_idle_keep_results", 6, 1))
+        hard = set(indices[-3:]) | {i for i in indices if i < prefix}
+        eligible = [i for i in indices if i not in hard]
+        soft = set(indices[-active_keep:]) - hard
+        idle_protected = set(indices[-idle_keep:]) - hard
+
+        def size(i: int) -> int:
+            content = str(contexts[i].get("content", ""))
+            return 0 if content.startswith("[工具结果已归档:") else len(content)
+
+        weak_trigger = max(4000, self._int("tool_context_weak_trigger_chars", 18000, 4000))
+        eligible_size = sum(size(i) for i in eligible)
+        soft_unlock = eligible_size > int(weak_trigger * 1.5)
+        expired = [
+            i for i in eligible
+            if seen_idx.get(i, 0) < cutoff
+            and i not in idle_protected
+            and (i not in soft or soft_unlock)
+        ]
+        # 全部池：软保护未解锁时排除软保护；空闲保护始终可被正常压缩。
+        all_pool = [
+            i for i in eligible
+            if i not in soft or soft_unlock or i in idle_protected
+        ]
+        weak_budget = max(2000, self._int("tool_context_weak_max_chars", 9000, 2000))
+        normal_trigger = max(10000, self._int("tool_context_trigger_chars", 36000, 10000))
+        normal_budget = max(4000, self._int("tool_context_max_chars", 18000, 4000))
         changed = 0
-        for i in candidates:
-            if used <= budget:
-                break
-            msg = contexts[i]
-            content = msg.get("content")
-            if isinstance(content, str) and content != placeholder:
+        placeholder = str(self._get("tool_context_placeholder", "[工具结果已压缩]"))
+
+        def compress(pool: list[int], budget: int) -> int:
+            used = sum(size(i) for i in pool)
+            local = 0
+            for i in pool:
+                if used <= budget:
+                    break
+                content = str(contexts[i].get("content", ""))
+                if not content or content == placeholder or content.startswith("[工具结果已归档:"):
+                    continue
                 digest = self._store_artifact(scope, content) if scope else ""
                 pointer = f"[工具结果已归档:{digest}]" if digest else placeholder
                 used -= max(0, len(content) - len(pointer))
-                msg["content"] = pointer
-                changed += 1
+                contexts[i]["content"] = pointer
+                local += 1
+            return local
+
+        batch = max(1, self._int("tool_context_batch_results", 6, 1))
+        expired_handled = False
+        if len(expired) >= batch and sum(size(i) for i in expired) >= weak_trigger:
+            changed += compress(expired, weak_budget)
+            expired_handled = changed > 0
+        # 全部池是兜底：包含过期项；过期池这轮处理好了就不再执行。
+        if not expired_handled and len(all_pool) >= batch and sum(size(i) for i in all_pool) >= normal_trigger:
+            changed += compress(all_pool, normal_budget)
         if changed:
-            logger.info(f"memory5: tool context compressed {changed} old results (chars={used}/{budget})")
+            self._tool_compress_last_at[scope or ""] = now
+            logger.info(
+                f"memory5: tool context compressed {changed} results "
+                f"(expired={len(expired)}, all={len(all_pool)}, batch={batch})"
+            )
         return changed
 
     @filter.on_llm_request()
@@ -2334,12 +2438,15 @@ class Memory5(Star):
             _, guard = self._cache_protection()
             previous = self._last_request_at.get(scope, 0) if scope else 0
             allow_cleanup = not previous or now - previous >= guard * 60
+            placeholder_idle = max(1, self._int("placeholder_idle_minutes", 10, 1))
+            placeholder_due = not previous or now - previous >= placeholder_idle * 60
             if scope:
                 self._last_request_at[scope] = now
             contexts = getattr(req, "contexts", None)
             seen_ctx, cutoff = self._mark_context_seen(scope or "", contexts if isinstance(contexts, list) else [], now)
+            if placeholder_due:
+                self._remove_placeholder_context(req, scope or "", seen_ctx, now)
             self._trim_tool_context(req, allow_cleanup, scope or "")
-            cache_friendly = bool(self._get("cache_friendly", True))
             # Archive-triggered pending cleanup is the original behavior.
             # Only the low-density context cleanup has its own switch.
             self._clean_pending_context(req, allow_cleanup, scope or "", seen_ctx, cutoff)

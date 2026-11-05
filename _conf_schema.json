@@ -204,26 +204,68 @@
       "tool_context_trigger_chars": {
         "description": "工具结果触发字符数",
         "type": "int",
-        "default": 38400,
-        "hint": "只统计工具结果总字符数；超过该值才压缩，不统计整段上下文。"
+        "default": 36000,
+        "hint": "全部池兜底阈值：包含过期项，只统计前缀/最近保护之外的旧工具结果；过期池未处理时才使用。"
+      },
+      "tool_context_weak_trigger_chars": {
+        "description": "过期段工具结果触发字符数",
+        "type": "int",
+        "default": 18000,
+        "hint": "只统计过期池实际能压缩的工具结果字符；达到该值才压缩，默认 18000。"
       },
       "tool_context_keep_results": {
         "description": "保留最近工具结果数",
         "type": "int",
-        "default": 20,
-        "hint": "活跃时最近 20 条软保护；空闲清理时只保留最近 10 条。最近 3 条优先保护，达到预算 2.05 倍才会压缩。"
+        "default": 12,
+        "hint": "软保护：最近 12 条不硬排除；当可压缩工具结果超过过期阈值 1.5 倍时，正常和过期压缩都可以处理；最近 3 条始终硬保护。"
       },
       "tool_context_idle_keep_results": {
         "description": "空闲清理保留工具结果数",
-        "hint": "空闲清理模式下优先保护最近多少条工具结果；默认 10。不是硬保证，预算不足时会继续压缩更早结果；最近 3 条仍优先保护。",
+        "hint": "空闲保护：最近 6 条不被过期池压缩，但正常压缩可以压缩；最近 3 条始终硬保护。",
         "type": "int",
-        "default": 10
+        "default": 6
+      },
+      "tool_context_batch_results": {
+        "description": "工具结果批量清理条数",
+        "type": "int",
+        "default": 6,
+        "hint": "过期池或全部池累计达到该条数才统一清理；默认 6。"
+      },
+      "tool_context_cooldown_minutes": {
+        "description": "工具压缩冷却（分钟）",
+        "type": "int",
+        "default": 10,
+        "hint": "工具结果压缩成功后，多少分钟内不再压缩；默认 10，推荐 5–15。"
+      },
+      "placeholder_max_messages": {
+        "description": "占位符批量清理条数",
+        "type": "int",
+        "default": 30,
+        "hint": "历史占位符消息超过该条数时清理整条消息；默认 30。"
+      },
+      "placeholder_max_days": {
+        "description": "占位符保留天数",
+        "type": "int",
+        "default": 3,
+        "hint": "占位符消息超过该天数时清理整条消息；默认 3。"
+      },
+      "placeholder_idle_minutes": {
+        "description": "占位符清理空闲分钟",
+        "type": "int",
+        "default": 10,
+        "hint": "距离上次请求达到该分钟数才执行占位符清理；默认 10，推荐 5–15。"
       },
       "tool_context_max_chars": {
         "description": "工具结果总字符预算",
-        "hint": "只压缩前缀/最近结果之外的旧工具结果，直到工具结果总量回到该预算；默认 19200。",
+        "hint": "只压缩前缀/最近结果之外的旧工具结果，目标预算默认 18000；按 180 条样本设约一半。",
         "type": "int",
-        "default": 19200
+        "default": 18000
+      },
+      "tool_context_weak_max_chars": {
+        "description": "过期段工具结果预算",
+        "type": "int",
+        "default": 9000,
+        "hint": "仅用于超过缓存保护的中间工具结果，默认正常预算的一半。"
       },
       "tool_context_placeholder": {
         "description": "旧工具结果占位符",
@@ -568,8 +610,8 @@
       "gate_batch_max_messages": {
         "description": "单次合并消息上限",
         "type": "int",
-        "default": 5,
-        "hint": "同一段防抖窗口内最多合并多少条；默认 8。"
+        "default": 8,
+        "hint": "同一段防抖窗口内最多合并多少条；默认 8，适合 180–200 条窗口的群聊，减少 API 调用。"
       },
       "gate_log_enabled": {
         "description": "记录判读决策日志",
@@ -686,10 +728,10 @@
     "type": "object",
     "items": {
       "cache_guard_minutes": {
-        "description": "活跃保护分钟数",
+        "description": "消息弱保护期（分钟）",
         "type": "int",
-        "default": 75,
-        "hint": "最近 N 分钟内有请求时跳过旧上下文清理和工具清理；默认 75。中等群建议 75，缓存优先可用 90。"
+        "default": 25,
+        "hint": "与节省上下文保持一致，默认 25 分钟；前缀和最近轮强保护，中间旧消息按时间戳弱保护。"
       },
       "cache_prefix_messages": {
         "description": "保护前缀消息数",

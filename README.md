@@ -64,7 +64,7 @@
 
 这样既尽量保留上游 Prompt Cache 的稳定前缀，也避免动态记忆污染历史。
 
-低密度上下文清理和工具循环压缩由鱼鱼日记自己的“缓存保护”控制：可设 `cache_guard_minutes`（默认 120）、`cache_prefix_messages`（默认 105）和 `index_snapshot_ttl_seconds`（默认 3 小时）。工具结果先保留最近 36 条，再按 `tool_context_max_chars`（默认 36000 字符）预算压缩更老的结果。
+低密度上下文清理和工具循环压缩由鱼鱼日记自己的“缓存保护”控制：可设 `cache_guard_minutes`（默认 25）、`cache_prefix_messages`（默认 24）和 `index_snapshot_ttl_seconds`（默认 3 小时）。工具结果先保留最近 12 条（空闲 6 条），再按 `tool_context_max_chars`（默认 18000 字符）预算压缩更老的结果。
 
 
 ## 加密
