@@ -243,6 +243,7 @@ TOPIC_ALIASES = {
     "提醒": ("提醒", "记得", "别忘了", "到点"),
     "归档": ("归档", "整理", "记忆", "日记"),
     "查询": ("查询", "查", "联网", "搜索", "看一下"),
+    "余额查询": ("余额", "查余额", "还有多少钱", "余额多少"),
     "底线": ("底线", "不可以", "禁止", "别", "不能"),
     "保密": ("保密", "私密", "不能说", "别告诉", "秘密"),
     "私密": ("私密", "亲密", "身体", "不能对外说"),
@@ -2151,7 +2152,9 @@ class Memory5(Star):
                 if topic in SENSITIVE_TOPICS:
                     continue
                 hits = self._keyword_hits(e, text)
-                if not (self._topic_hit(topic, text) or hits):
+                if not (self._topic_hit(topic, text)
+                        or any(len(token) >= 3 for token in hits)
+                        or len(hits) >= 2):
                     continue
                 candidates.append((self._match_score(e, text, sender, scope), str(e.get("date", "")), e))
             candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
