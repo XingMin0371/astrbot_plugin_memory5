@@ -231,6 +231,7 @@ CACHE_PREFIX_MESSAGES = 24
 PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
 SENSITIVE_TOPICS = {"私密", "亲密", "身体", "底线", "保密", "隐私", "密码"}
 CORE_ALWAYS_TOPICS = {"身份", "称呼", "关系", "底线", "保密", "私密", "主人", "权限", "管理员"}
+CORE_EXCLUDED_TOPICS = {"约定"}
 TOPIC_ALIASES = {
     "称呼": ("叫法", "名字", "怎么叫", "昵称", "外号"),
     "身份": ("身份", "是谁", "什么身份", "干什么的"),
@@ -1877,6 +1878,18 @@ class Memory5(Star):
         # two independent keyword hits. Recall intent no longer injects all.
         return any(len(token) >= 3 for token in hits) or len(hits) >= 2
 
+    def _match_loose(self, entry: dict, text: str, sender: str) -> bool:
+        topic = str(entry.get("topic", ""))
+        subject = str(entry.get("subject"))
+        if subject != str(sender) and subject not in self._mentions(text):
+            return False
+        if topic in SENSITIVE_TOPICS:
+            return False
+        if not (self._topic_hit(topic, text)
+                or bool(topic and _norm_text(topic) in _norm_text(text))):
+            return False
+        return bool(self._keyword_hits(entry, text))
+
     def _match_score(self, entry: dict, text: str, sender: str) -> int:
         topic = str(entry.get("topic", ""))
         subject = str(entry.get("subject"))
@@ -2009,17 +2022,8 @@ class Memory5(Star):
                 matched = CORE_LINE_RE.match(line.strip())
                 if matched:
                     topic = matched.group("topic")
-                    always = topic in CORE_ALWAYS_TOPICS or any(
-                        word in topic for word in ("身份", "称呼", "关系", "底线", "保密", "主人", "权限", "管理员")
-                    )
-                    if not always:
-                        entry = {
-                            "topic": topic,
-                            "subject": matched.group("subject"),
-                            "text": matched.group("text"),
-                        }
-                        if not self._keyword_hits(entry, text):
-                            continue
+                    if topic in CORE_EXCLUDED_TOPICS:
+                        continue
                 is_dup(matched.group("text") if matched else line)
                 if not matched or not compact_memory or matched.group("topic") in PERSONA_TOPICS:
                     rendered_core.append(line)
@@ -2153,6 +2157,13 @@ class Memory5(Star):
                 (matched if self._match(e, text, sender) else rest).append(e)
             elif tag == "低密度" and str(e.get("date", "")) >= low_cutoff and self._match(e, text, sender):
                 low.append(e)
+        if not matched:
+            fallback = [
+                e for e in daily
+                if e.get("tag") == "普通" and self._match_loose(e, text, sender)
+            ]
+            fallback.sort(key=lambda e: str(e.get("date", "")), reverse=True)
+            matched = fallback[:3]
 
         # 普通段有独立预算，不和长期/重要抢
         normal_used = 0
