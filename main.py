@@ -661,6 +661,9 @@ def aliases_path(scope: str) -> str:
     return scope_paths(scope)["aliases"]
 
 
+_ALIAS_VERSIONS: dict[str, float] = {}
+
+
 def load_aliases(scope: str) -> dict:
     return read_json(aliases_path(scope), {})
 
@@ -691,6 +694,7 @@ def update_aliases(scope: str, pairs: list[dict]) -> None:
         changed = True
     if changed:
         write_json(aliases_path(scope), data)
+        _ALIAS_VERSIONS[scope] = time.time()
 
 
 # ------------------------------------------------------------- desensitize
@@ -1024,9 +1028,10 @@ class Memory5(Star):
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
         self._bg_tasks: list[asyncio.Task] = []
-        self._alias_cache: dict[str, tuple[float, dict]] = {}
+        self._alias_cache: dict[str, tuple[float, float, dict]] = {}
         self._alias_lock = threading.Lock()
         self._build_lock = threading.Lock()
+        self._daily_lock = threading.RLock()
 
     # ------------------------------------------------------------- config
     @staticmethod
@@ -1749,6 +1754,7 @@ class Memory5(Star):
             lines.pop(0)
             body = "\n".join(lines)
         write_text(path, body + "\n")
+        self._invalidate_index_snapshot(scope)
 
     def _write_core_many(self, scope: str, entries: list[dict]) -> None:
         """批量写入长期记忆：整份文件只读写一次。"""
@@ -1765,6 +1771,7 @@ class Memory5(Star):
             lines.pop(0)
             body = "\n".join(lines)
         write_text(path, body + "\n")
+        self._invalidate_index_snapshot(scope)
 
     # ---------------------------------------------------------- injection
     @staticmethod
@@ -1832,6 +1839,10 @@ class Memory5(Star):
         return removed
 
     def _load_daily(self, scope: str, days: int) -> list[dict]:
+        with self._daily_lock:
+            return self._load_daily_locked(scope, days)
+
+    def _load_daily_locked(self, scope: str, days: int) -> list[dict]:
         base = scope_paths(scope)["daily_dir"]
         if not os.path.isdir(base):
             return []
@@ -1867,10 +1878,11 @@ class Memory5(Star):
 
     def _aliases_for(self, scope: str) -> dict:
         now = time.time()
+        version = _ALIAS_VERSIONS.get(scope, 0.0)
         with self._alias_lock:
             cached = self._alias_cache.get(scope)
-            if cached and now - cached[0] < 60:
-                return cached[1]
+            if cached and cached[1] == version and now - cached[0] < 60:
+                return cached[2]
         try:
             data = load_aliases(scope)
         except Exception:
@@ -1878,7 +1890,7 @@ class Memory5(Star):
         if not isinstance(data, dict):
             data = {}
         with self._alias_lock:
-            self._alias_cache[scope] = (now, data)
+            self._alias_cache[scope] = (now, version, data)
         return data
 
     def _resolve_alias_ids(self, scope: str, text: str) -> set[str]:
