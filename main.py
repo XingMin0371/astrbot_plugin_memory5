@@ -277,7 +277,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.6.8"
+VERSION = "2.6.9"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -909,7 +909,7 @@ def merge_from_db(scope: str, since_ts: str) -> int:
         cur.execute(
             "SELECT created_at, sender_id, sender_name, content FROM platform_message_history "
             "WHERE user_id LIKE ? AND created_at > ? ORDER BY created_at LIMIT 500",
-            (f"%GroupMessage:{group_id}", since_utc),
+            (f"%:{group_id}", since_utc),
         )
         records = cur.fetchall()
         con.close()
@@ -1153,20 +1153,54 @@ class Memory5(Star):
 
     # -------------------------------------------------------------- scope
     @staticmethod
+    def _event_is_admin(event: AstrMessageEvent) -> bool:
+        checker = getattr(event, "is_admin", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                return False
+        if isinstance(checker, bool):
+            return checker
+        role = str(getattr(event, "role", "") or "").lower()
+        return role in {"admin", "owner", "administrator"}
+
+    @staticmethod
+    def _scope_from_umo(umo: str) -> str | None:
+        parts = str(umo or "").split(":")
+        if len(parts) < 3:
+            return None
+        kind = parts[1].lower()
+        if any(word in kind for word in ("group", "channel", "guild")):
+            return f"group:{parts[2]}"
+        if any(word in kind for word in ("friend", "private", "direct", "c2c", "dm")):
+            return f"private:{parts[2]}"
+        return None
+
+    @staticmethod
     def scope_of(event: AstrMessageEvent) -> str | None:
         umo = getattr(event, "unified_msg_origin", "") or ""
         parts = umo.split(":")
-        if len(parts) >= 3:
-            kind = parts[1]
-            if kind == "GroupMessage":
-                scope = f"group:{parts[2]}"
-            elif kind == "FriendMessage":
-                scope = f"private:{event.get_sender_id()}"
-            else:
-                return None
-            record_umo(scope, umo)
-            return scope
-        return None
+        kind = parts[1].lower() if len(parts) >= 3 else ""
+        session_id = parts[2] if len(parts) >= 3 else ""
+        sender = str(getattr(event, "get_sender_id", lambda: "")() or "")
+        group_id = ""
+        try:
+            get_group = getattr(event, "get_group_id", None)
+            if callable(get_group):
+                group_id = str(get_group() or "")
+        except Exception:
+            group_id = ""
+        if not group_id:
+            group_id = session_id if any(word in kind for word in ("group", "channel", "guild")) else ""
+        if group_id:
+            scope = f"group:{group_id}"
+        elif any(word in kind for word in ("friend", "private", "direct", "c2c", "dm")) or sender:
+            scope = f"private:{sender or session_id}"
+        else:
+            return None
+        record_umo(scope, umo)
+        return scope
 
     # --------------------------------------------------------- light gate
     def _gate_names(self) -> list[str]:
@@ -1624,7 +1658,7 @@ class Memory5(Star):
             return "\n".join(
                 str(part.get("text", ""))
                 for part in content
-                if isinstance(part, dict) and part.get("type") in {"text", "plain"}
+                if isinstance(part, dict) and part.get("type") in {"text", "plain", "input_text", "output_text"}
             )
         return ""
 
@@ -2402,11 +2436,8 @@ class Memory5(Star):
             con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
             try:
                 for uid, content in con.execute("select user_id, content from conversations"):
-                    if ":GroupMessage:" in uid:
-                        scope = "group:" + uid.split(":GroupMessage:", 1)[1]
-                    elif ":FriendMessage:" in uid:
-                        scope = "private:" + uid.split(":FriendMessage:", 1)[1]
-                    else:
+                    scope = Memory5._scope_from_umo(uid)
+                    if not scope:
                         continue
                     safe_scope = re.sub(r"[^A-Za-z0-9_-]", "_", scope)
                     for artifact_id in re.findall(r"工具结果已归档:([0-9a-f]{16})", content or ""):
@@ -4303,7 +4334,7 @@ class Memory5(Star):
         try:
             scope = self.scope_of(event) or "group:unknown"
             me = str(event.get_sender_id())
-            is_admin = me in self.admin_qqs() or bool(event.is_admin())
+            is_admin = me in self.admin_qqs() or self._event_is_admin(event)
 
             text = (event.message_str or "").replace("/记忆查看", "").strip()
             tokens = [t for t in re.split(r"[\s,，]+", text) if t]
