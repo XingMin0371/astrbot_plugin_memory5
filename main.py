@@ -21,6 +21,7 @@ import secrets
 import re
 import shutil
 import sqlite3
+import threading
 import time
 import urllib.request
 from collections import OrderedDict, deque
@@ -1023,6 +1024,9 @@ class Memory5(Star):
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
         self._bg_tasks: list[asyncio.Task] = []
+        self._alias_cache: dict[str, tuple[float, dict]] = {}
+        self._alias_lock = threading.Lock()
+        self._build_lock = threading.Lock()
 
     # ------------------------------------------------------------- config
     @staticmethod
@@ -1202,7 +1206,7 @@ class Memory5(Star):
     def _gate_mention_targets(self, scope: str, text: str, sender: str) -> list[str]:
         """Resolve exact QQ digits and aliases without short-alias noise."""
         try:
-            aliases = load_aliases(scope)
+            aliases = self._aliases_for(scope)
         except Exception:
             return []
         if not isinstance(aliases, dict):
@@ -1861,13 +1865,26 @@ class Memory5(Star):
     def _mentions(text: str) -> set[str]:
         return set(re.findall(r"\d{5,12}", text or ""))
 
+    def _aliases_for(self, scope: str) -> dict:
+        now = time.time()
+        with self._alias_lock:
+            cached = self._alias_cache.get(scope)
+            if cached and now - cached[0] < 60:
+                return cached[1]
+        try:
+            data = load_aliases(scope)
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        with self._alias_lock:
+            self._alias_cache[scope] = (now, data)
+        return data
+
     def _resolve_alias_ids(self, scope: str, text: str) -> set[str]:
         if not scope:
             return set()
-        try:
-            aliases = load_aliases(scope)
-        except Exception:
-            return set()
+        aliases = self._aliases_for(scope)
         found: dict[str, list[tuple[float, str]]] = {}
         for qq, entries in aliases.items():
             for entry in entries or []:
@@ -1977,7 +1994,7 @@ class Memory5(Star):
         if not qq:
             return "未知"
         try:
-            aliases = load_aliases(scope)
+            aliases = self._aliases_for(scope)
             entries = aliases.get(qq, []) if isinstance(aliases, dict) else []
             for entry in entries or []:
                 alias = str(entry.get("alias", "") if isinstance(entry, dict) else "").strip()
@@ -2059,6 +2076,10 @@ class Memory5(Star):
         if len(first) > limit:
             first = first[:max(1, limit - 1)].rstrip() + "…"
         return first
+
+    def _build_block_locked(self, scope: str, sender: str, text: str) -> str:
+        with self._build_lock:
+            return self.build_block(scope, sender, text)
 
     def build_block(self, scope: str, sender: str, text: str) -> str:
         chunks: list[str] = []
@@ -2738,7 +2759,9 @@ class Memory5(Star):
                 return
             if not scope:
                 return
-            block = self.build_block(scope, str(event.get_sender_id()), event.message_str or "")
+            block = await asyncio.to_thread(
+                self._build_block_locked, scope, str(event.get_sender_id()), event.message_str or ""
+            )
             meta = self._message_meta(event, scope)
             if not block:
                 if meta:
