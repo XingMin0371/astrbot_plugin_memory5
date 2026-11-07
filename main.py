@@ -1993,9 +1993,7 @@ class Memory5(Star):
     def _specific_hits(self, entry: dict, text: str) -> list[str]:
         return [token for token in self._keyword_hits(entry, text) if token not in FALLBACK_IGNORE]
 
-    def _match(self, entry: dict, text: str, sender: str,
-               strict_topic: bool = False, recall_intent: bool = False,
-               scope: str = "") -> bool:
+    def _match(self, entry: dict, text: str, sender: str, scope: str = "") -> bool:
         topic = str(entry.get("topic", ""))
         subject_hit = self._subject_hit(entry, text, sender, scope)
         topic_hit = self._topic_hit(topic, text)
@@ -2221,7 +2219,7 @@ class Memory5(Star):
         recall_intent = any(word in text for word in RECALL_WORDS)
         picked = [
             e for e in important
-            if self._match(e, text, sender, strict_topic=True, recall_intent=recall_intent, scope=scope)
+            if self._match(e, text, sender, scope)
             and not is_dup(str(e.get("text", "")))
         ]
         fallback_used = False
