@@ -241,9 +241,13 @@ class _TasksMixin:
         media_name = str(body.get("media", "")).strip()
         if media_name:
             media_name = os.path.basename(media_name)
-            path = os.path.join(MEM_ROOT, "media", media_name)
-            if not os.path.abspath(path).startswith(os.path.abspath(os.path.join(MEM_ROOT, "media"))):
-                raise ValueError("非法媒体路径")
+            media_root = os.path.realpath(os.path.join(MEM_ROOT, "media"))
+            path = os.path.realpath(os.path.join(media_root, media_name))
+            try:
+                if os.path.commonpath([media_root, path]) != media_root:
+                    raise ValueError("非法媒体路径")
+            except ValueError:
+                raise ValueError("非法媒体路径") from None
             repeat_limit = self.plugin._int_raw("repeat_media_limit_mb", 30)
             if repeat_limit > 0 and os.path.isfile(path) and os.path.getsize(path) > repeat_limit * 1024 * 1024:
                 if kind == "weekly":
@@ -352,8 +356,13 @@ class _TasksMixin:
         media_dir = os.path.join(MEM_ROOT, "media")
         ensure_dir(media_dir)
         filename = uuid.uuid4().hex[:12] + ext
-        with open(os.path.join(media_dir, filename), "wb") as fh:
+        target_path = os.path.join(media_dir, filename)
+        with open(target_path, "wb") as fh:
             fh.write(raw)
+        try:
+            os.chmod(target_path, 0o600)
+        except OSError:
+            pass
         return jsonify({"status": "ok", "data": {"media": filename, "kind": kind}}) 
     # ------------------------------------------------------------ 导出/别名/健康
     async def bulk(self):
@@ -462,7 +471,10 @@ class _TasksMixin:
         end = (request.args.get("end") or "").strip()
         if not scope:
             raise ValueError("缺少 scope")
+        data = await asyncio.to_thread(self._export_payload, scope, fmt, device, start, end)
+        return jsonify({"status": "ok", "data": data})
 
+    def _export_payload(self, scope: str, fmt: str, device: str, start: str, end: str) -> dict:
         def in_range(day: str) -> bool:
             if start and day < start:
                 return False
@@ -470,7 +482,7 @@ class _TasksMixin:
                 return False
             return True
 
-        from .main import refresh_index, scope_paths, write_plain_json  # 延迟导入，避免循环
+        from .main import refresh_index, scope_paths, write_plain_json
 
         paths = scope_paths(scope)
         core = read_text(paths["core"])
@@ -523,7 +535,7 @@ class _TasksMixin:
 
         try:
             refresh_index(scope)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         try:
             history_path = os.path.join(MEM_ROOT, "export_history.json")
@@ -537,11 +549,9 @@ class _TasksMixin:
                 "device": device or "未知",
             })
             write_plain_json(history_path, history[-50:])
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
-        return jsonify({"status": "ok", "data": {
-            "filename": filename, "content": content, "device": device or "未知",
-        }})
+        return {"filename": filename, "content": content, "device": device or "未知"}
 
     def _nickname(self, scope: str, qq: str) -> str:
         """从最近的原始消息里找这个 QQ 的昵称。"""
@@ -1074,7 +1084,10 @@ class Memory5WebUI(_TasksMixin):
         base = scope_dir(scope)
         found: set[str] = set()
         for path in glob.glob(os.path.join(base, "daily", "*.jsonl")):
-            found.add(os.path.basename(path)[:-6])
+            # Only list days that actually have content.  Otherwise an empty
+            # today file would win defaultDay() and hide yesterday's diary.
+            if read_jsonl(path):
+                found.add(os.path.basename(path)[:-6])
         for row in read_jsonl(os.path.join(base, "important.jsonl")):
             if row.get("date"):
                 found.add(str(row["date"])[:10])
@@ -1107,26 +1120,30 @@ class Memory5WebUI(_TasksMixin):
             scopes.append({"scope": name.replace("_", ":", 1),
                            "days": len(glob.glob(os.path.join(path, "daily", "*.jsonl")))})
         payload = {"scopes": scopes, "dates": {}}
-        if scopes:
-            payload["dates"][scopes[0]["scope"]] = self._scope_dates(scopes[0]["scope"])
+        for item in scopes:
+            payload["dates"][item["scope"]] = self._scope_dates(item["scope"])
         return jsonify({"status": "ok", "data": payload})
 
-    def _page_args(self, total: int) -> tuple[int, int, int]:
-        try:
-            page = int(request.args.get("page", "1"))
-        except (TypeError, ValueError):
-            page = 1
-        try:
-            size = int(request.args.get("page_size", "10"))
-        except (TypeError, ValueError):
-            size = 10
-        size = max(1, min(size, 100))
+    def _page_args(self, total: int, page: int | None = None,
+                   page_size: int | None = None) -> tuple[int, int, int]:
+        if page is None:
+            try:
+                page = int(request.args.get("page", "1"))
+            except (TypeError, ValueError):
+                page = 1
+        if page_size is None:
+            try:
+                page_size = int(request.args.get("page_size", "10"))
+            except (TypeError, ValueError):
+                page_size = 10
+        size = max(1, min(int(page_size), 100))
         pages = max(1, (total + size - 1) // size)
         page = max(1, min(page, pages))
         return page, size, pages
 
-    def _paged(self, rows: list) -> dict:
-        page, size, pages = self._page_args(len(rows))
+    def _paged(self, rows: list, page: int | None = None,
+               page_size: int | None = None) -> dict:
+        page, size, pages = self._page_args(len(rows), page, page_size)
         start = (page - 1) * size
         return {
             "items": rows[start:start + size],
@@ -1144,9 +1161,20 @@ class Memory5WebUI(_TasksMixin):
         query = (request.args.get("q") or "").strip()[:100]
         if not scope:
             raise ValueError("缺少 scope")
+        try:
+            page = int(request.args.get("page", "1"))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            page_size = int(request.args.get("page_size", "10"))
+        except (TypeError, ValueError):
+            page_size = 10
+        payload = await asyncio.to_thread(self._page_payload, scope, tab, day, query, page, page_size)
+        return jsonify({"status": "ok", "data": payload})
 
+    def _page_payload(self, scope: str, tab: str, day: str, query: str,
+                      page: int = 1, page_size: int = 10) -> dict:
         dates = self._scope_dates(scope)
-
         if tab == "core":
             items = core_items(read_text(os.path.join(scope_dir(scope), "core.md")))
             for item in items:
@@ -1157,14 +1185,14 @@ class Memory5WebUI(_TasksMixin):
             if query:
                 items = [i for i in items
                          if query in str(i.get("subject", "")) or query in str(i.get("text", ""))]
-            payload = self._paged(items)
+            payload = self._paged(items, page, page_size)
         else:
             source = tab if tab in ("important", "remind") else "daily"
             if source == "daily":
                 tag = "低密度" if tab == "low" else "普通"
                 if day:
                     rows = read_jsonl(entries_path(scope, "daily", day))
-                else:  # 全部日期
+                else:
                     rows = []
                     for path in sorted(glob.glob(os.path.join(scope_dir(scope), "daily", "*.jsonl"))):
                         rows.extend(read_jsonl(path))
@@ -1181,10 +1209,9 @@ class Memory5WebUI(_TasksMixin):
                 rows = [r for r in rows
                         if query in str(r.get("subject", "")) or query in str(r.get("text", ""))]
             rows.sort(key=lambda r: (r.get("date", ""), r.get("seq", 0)))
-            payload = self._paged(rows)
-
+            payload = self._paged(rows, page, page_size)
         payload["dates"] = dates
-        return jsonify({"status": "ok", "data": payload})
+        return payload
 
     async def update(self):
         body = await request.get_json() or {}
@@ -1304,7 +1331,7 @@ class Memory5WebUI(_TasksMixin):
             raise ValueError("没有这个范围")
         ensure_dir(TRASH_DIR)
         stamp = f"{int(time.time())}-{uuid.uuid4().hex[:6]}"
-        shutil.move(target, os.path.join(TRASH_DIR, f"scope-{stamp}"))
+        await asyncio.to_thread(shutil.move, target, os.path.join(TRASH_DIR, f"scope-{stamp}"))
         self._invalidate_dates(scope)
         return jsonify({"status": "ok"})
 

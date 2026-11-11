@@ -300,7 +300,7 @@
       },
       "filter_low_density": {
         "description": "归档前过滤低密度消息",
-        "hint": "默认开启：归档压缩前丢弃复读、词汇重复、过短或与前后文无共同词的内容，节省 Token",
+        "hint": "默认开启：每次归档前丢弃复读、词汇重复、过短或与前后文无共同词的内容，节省 Token。",
         "type": "bool",
         "default": true
       },
@@ -312,9 +312,9 @@
       },
       "filter_low_density_night_only": {
         "description": "仅在凌晨归档过滤",
-        "hint": "默认开启：只在 00:00-06:00 的归档前过滤；关闭后每次归档都会过滤",
+        "hint": "默认关闭：每次归档都过滤；开启后仅在 00:00-06:00 的归档前过滤。",
         "type": "bool",
-        "default": true
+        "default": false
       }
     }
   },
@@ -591,20 +591,20 @@
       "cold_cache_seconds": {
         "description": "冷群缓存有效秒数",
         "type": "int",
-        "default": 900,
-        "hint": "冷群缓存保留时间，默认 900 秒。"
+        "default": 1500,
+        "hint": "冷群缓存保留时间，默认 1500 秒（25 分钟）。"
       },
       "cold_cache_max_messages": {
         "description": "冷群缓存消息上限",
         "type": "int",
-        "default": 20,
-        "hint": "冷群缓存最多保留消息数，默认 20。"
+        "default": 28,
+        "hint": "冷群缓存最多保留消息数，默认 28；兼顾覆盖和单次 token。"
       },
       "gate_batch_max_messages": {
         "description": "单次合并消息上限",
         "type": "int",
-        "default": 8,
-        "hint": "同一段防抖窗口内最多合并多少条；默认 8，适合 180–200 条窗口的群聊，减少 API 调用。"
+        "default": 6,
+        "hint": "同一段防抖窗口内最多合并多少条；默认 6，控制单次 token；不改变 API 调用次数。"
       },
       "gate_log_enabled": {
         "description": "记录判读决策日志",

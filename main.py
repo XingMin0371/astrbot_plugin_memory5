@@ -277,7 +277,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.6.9"
+VERSION = "2.7.1"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下记忆是用第三人称写的，是你自己的日记，不是别人】"
@@ -785,6 +785,23 @@ def raw_dir(scope: str) -> str:
     return os.path.join(scope_dir(scope), "raw")
 
 
+def _is_collect_noise(text: str) -> bool:
+    """Structural junk that should never enter the archive raw store."""
+    t = str(text or "").strip()
+    if not t:
+        return True
+    if re.search(r"<system_reminder>.*?</system_reminder>", t, re.S | re.I):
+        return True
+    if t.startswith("[CronJob]") or "Output your last task result below" in t:
+        return True
+    if re.search(r"\[?工具结果已归档:[^\]\s]*\]?", t, re.I):
+        return True
+    if t in {"[图片]", "[表情]", "[Poke]", "【今日回忆已完成归档】", "[推理已省略]", "[工具结果已压缩]"}:
+        return True
+    if re.fullmatch(r"[\W\d_]+", t) or len(set(t)) == 1:
+        return True
+    return False
+
 def append_raw(scope: str, qq: str, name: str, text: str) -> None:
     text = (text or "").replace("\n", " ").strip()[:300]
     if not text:
@@ -1004,7 +1021,7 @@ text 的写法（很重要）：
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.3.5")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.7.0")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -1017,6 +1034,9 @@ class Memory5(Star):
         self._last_command_at: dict[str, float] = {}
         self._gate_buffers: dict[str, list[str]] = {}
         self._gate_seq: dict[str, int] = {}
+        self._gate_log_buffer: list[tuple[str, str]] = []
+        self._gate_log_last_flush = 0.0
+        self._gate_tasks: dict[str, object] = {}
         self._attention: dict[str, dict[str, tuple[float, float]]] = {}
         self._cold_cache: dict[str, deque] = {}
         self._index_snapshot: dict[str, tuple[str, float]] = {}
@@ -1027,6 +1047,8 @@ class Memory5(Star):
         self._ambient_last: dict[tuple[str, str], float] = {}
         self._task: asyncio.Task | None = None
         self._extract_task: asyncio.Task | None = None
+        self._raw_queue: asyncio.Queue | None = None
+        self._raw_task: asyncio.Task | None = None
         self._bg_tasks: list[asyncio.Task] = []
         self._alias_cache: dict[str, tuple[float, float, dict]] = {}
         self._alias_lock = threading.Lock()
@@ -1281,7 +1303,7 @@ class Memory5(Star):
     def _remember_cold(self, scope: str, text: str) -> None:
         if not text:
             return
-        max_items = max(1, self._int("cold_cache_max_messages", 20, 1))
+        max_items = max(1, self._int("cold_cache_max_messages", 28, 1))
         cache = self._cold_cache.setdefault(scope, deque(maxlen=max_items))
         cache.append((time.time(), text))
 
@@ -1289,7 +1311,7 @@ class Memory5(Star):
         cache = self._cold_cache.get(scope)
         if not cache:
             return text
-        ttl = max(30, self._int("cold_cache_seconds", 900, 30))
+        ttl = max(30, self._int("cold_cache_seconds", 1500, 30))
         cutoff = time.time() - ttl
         kept = [item for item in cache if item[0] >= cutoff]
         cache.clear()
@@ -1334,7 +1356,7 @@ class Memory5(Star):
     def _gate_log(self, scope: str, sender: str, direct: bool, score: int,
                   attention: float, decision: str, reason: str,
                   text_len: int) -> None:
-        """Write a cheap decision log; never record message text."""
+        """Buffer cheap decision logs; flush in batches off the hot path."""
         try:
             if not bool(self._get("gate_log_enabled", True)):
                 return
@@ -1342,9 +1364,6 @@ class Memory5(Star):
             if sample <= 0 or random.random() > sample:
                 return
             now = datetime.now(TZ)
-            log_dir = os.path.join(DATA_DIR, "plugin_data", "astrbot_plugin_memory5", "gate_logs")
-            os.makedirs(log_dir, exist_ok=True)
-            path = os.path.join(log_dir, now.strftime("%Y-%m-%d") + ".jsonl")
             row = {
                 "ts": now.isoformat(timespec="seconds"),
                 "scope": scope,
@@ -1356,9 +1375,26 @@ class Memory5(Star):
                 "reason": reason,
                 "text_len": int(text_len),
             }
-            with open(path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-            # Keep only the newest 5 daily files.
+            self._gate_log_buffer.append((now.strftime("%Y-%m-%d"), json.dumps(row, ensure_ascii=False)))
+            if len(self._gate_log_buffer) >= 20 or time.time() - self._gate_log_last_flush >= 2.0:
+                self._flush_gate_log()
+        except Exception as exc:  # logging must never break the gate
+            logger.debug(f"memory5: gate log skipped ({type(exc).__name__}: {exc})")
+
+    def _flush_gate_log(self) -> None:
+        if not self._gate_log_buffer:
+            return
+        try:
+            log_dir = os.path.join(DATA_DIR, "plugin_data", "astrbot_plugin_memory5", "gate_logs")
+            os.makedirs(log_dir, exist_ok=True)
+            groups: dict[str, list[str]] = {}
+            for day, line in self._gate_log_buffer:
+                groups.setdefault(day, []).append(line)
+            self._gate_log_buffer.clear()
+            for day, lines in groups.items():
+                path = os.path.join(log_dir, day + ".jsonl")
+                with open(path, "a", encoding="utf-8") as fh:
+                    fh.write("\n".join(lines) + "\n")
             files = sorted(
                 (os.path.join(log_dir, name) for name in os.listdir(log_dir) if name.endswith(".jsonl")),
                 key=os.path.getmtime,
@@ -1369,8 +1405,9 @@ class Memory5(Star):
                     os.remove(old)
                 except OSError:
                     pass
-        except Exception as exc:  # logging must never break the gate
-            logger.debug(f"memory5: gate log skipped ({type(exc).__name__}: {exc})")
+            self._gate_log_last_flush = time.time()
+        except Exception as exc:
+            logger.debug(f"memory5: gate log flush skipped ({type(exc).__name__}: {exc})")
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def light_gate(self, event: AstrMessageEvent):
@@ -1395,16 +1432,27 @@ class Memory5(Star):
                 event.should_call_llm(False)
                 return
 
-            debounce = max(0, self._int_raw("gate_debounce_ms", 700)) / 1000.0
+            debounce = max(0, self._int_raw("gate_debounce_ms", 1200)) / 1000.0
             seq = self._gate_seq.get(scope, 0) + 1
             self._gate_seq[scope] = seq
             buffer = self._gate_buffers.setdefault(scope, [])
             buffer.append(text)
-            batch_max = max(1, self._int_raw("gate_batch_max_messages", 8))
+            batch_max = max(1, self._int_raw("gate_batch_max_messages", 6))
             if len(buffer) > batch_max:
                 del buffer[:-batch_max]
             if debounce:
-                await asyncio.sleep(debounce)
+                current_task = asyncio.current_task()
+                previous_task = self._gate_tasks.get(scope)
+                if previous_task is not None and previous_task is not current_task and not previous_task.done():
+                    previous_task.cancel()
+                self._gate_tasks[scope] = current_task
+                try:
+                    await asyncio.sleep(debounce)
+                except asyncio.CancelledError:
+                    event.should_call_llm(False)
+                    return
+                if self._gate_tasks.get(scope) is current_task:
+                    self._gate_tasks.pop(scope, None)
             if self._gate_seq.get(scope) != seq:
                 event.should_call_llm(False)
                 return
@@ -1575,6 +1623,44 @@ class Memory5(Star):
             logger.debug(f"memory5: gate skipped ({type(exc).__name__}: {exc})")
 
     # ------------------------------------------------------------ collector
+    async def _enqueue_raw(self, scope: str, qq: str, name: str, text: str) -> None:
+        """Queue raw capture; a single writer keeps encryption/file IO off the event loop."""
+        text = (text or "").replace("\n", " ").strip()[:300]
+        if not text:
+            return
+        if self._raw_queue is None:
+            self._raw_queue = asyncio.Queue(maxsize=5000)
+            self._raw_task = asyncio.create_task(self._raw_writer())
+        await self._raw_queue.put((scope, str(qq), str(name)[:32], text))
+
+    async def _raw_writer(self) -> None:
+        queue = self._raw_queue
+        if queue is None:
+            return
+        while True:
+            item = await queue.get()
+            if item is None:
+                queue.task_done()
+                return
+            batch = [item]
+            while len(batch) < 50:
+                try:
+                    batch.append(queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            try:
+                await asyncio.to_thread(self._append_raw_batch, batch)
+            except Exception as exc:  # pragma: no cover - keep collector alive
+                logger.warning(f"memory5: raw 写入失败 {type(exc).__name__}: {exc}")
+            finally:
+                for _ in batch:
+                    queue.task_done()
+
+    @staticmethod
+    def _append_raw_batch(batch: list[tuple]) -> None:
+        for scope, qq, name, text in batch:
+            append_raw(scope, qq, name, text)
+
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def collect(self, event: AstrMessageEvent) -> None:
         """把白名单会话里的消息落一份，供后续抽取。
@@ -1608,19 +1694,30 @@ class Memory5(Star):
                     return
                 if scope and time.time() - self._last_command_at.get(scope, 0) < 15:
                     return
-                append_raw(scope, sender, str(event.get_sender_name() or ""), text)
+                if _is_collect_noise(text):
+                    return
+                await self._enqueue_raw(scope, sender, str(event.get_sender_name() or ""), text)
                 return
 
-            # 其他人：图片不记原图，等后续记鱼鱼的回复
-            if any(isinstance(c, Image) for c in (event.get_messages() or [])):
+            # 其他人：不存原图；带文字语义的图片/表情保留文字线索。
+            components = event.get_messages() or []
+            has_image = any(isinstance(c, Image) for c in components)
+            has_face = any(type(c).__name__ in ("Face", "Mface") for c in components)
+            if (has_image or has_face) and text in {"", "[图片]", "[表情]"}:
                 return
+            if has_image and text:
+                text = f"{text}（配图）"
+            elif has_face and text:
+                text = f"{text}（表情）"
             if sender in self.blacklist_qqs():
                 return
             if is_command_text(text):
                 if scope:
                     self._last_command_at[scope] = time.time()
                 return
-            append_raw(scope, sender, str(event.get_sender_name() or ""), text)
+            if _is_collect_noise(text):
+                return
+            await self._enqueue_raw(scope, sender, str(event.get_sender_name() or ""), text)
         except Exception as exc:  # pragma: no cover
             logger.debug(f"memory5: 采集跳过 {type(exc).__name__}: {exc}")
 
@@ -2910,9 +3007,43 @@ class Memory5(Star):
     def _should_filter_density(self) -> bool:
         if not bool(self._get("filter_low_density", True)):
             return False
-        if bool(self._get("filter_low_density_night_only", True)):
+        # Compatibility: users who only want the night archive filtered can
+        # keep this enabled.  Default false means every archive is filtered.
+        if bool(self._get("filter_low_density_night_only", False)):
             return 0 <= now().hour < 6
         return True
+
+    def _clean_archive_rows(self, rows: list[dict]) -> list[dict]:
+        """Remove structural noise before archive filtering and model extraction."""
+        cleanup_re = re.compile(r"<system_reminder>.*?</system_reminder>", re.S | re.I)
+        artifact_re = re.compile(r"\[?工具结果已归档:[^\]\s]*\]?", re.I)
+        placeholders = ("【今日回忆已完成归档】", "[Poke]", "[图片]", "[表情]",
+                        "[推理已省略]", "[工具结果已压缩]", "[内容已清理]")
+        out = []
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("text", ""))
+            text = cleanup_re.sub("", text)
+            text = artifact_re.sub("", text)
+            text = re.sub(r"\s+", " ", text).strip()
+            if not text:
+                continue
+            if any(text == p or text.startswith(p) for p in placeholders):
+                continue
+            if text.startswith("[CronJob]") or "Output your last task result below" in text:
+                continue
+            if re.fullmatch(r"[\W\d_]+", text) or len(set(text)) == 1:
+                continue
+            key = re.sub(r"[\s，。！？、；：“”‘’（）()\[\]【】]+", "", text).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            row = dict(row)
+            row["text"] = text
+            out.append(row)
+        return out
 
     def _filter_low_density(self, rows: list[dict]) -> tuple[list[dict], int]:
         """归档前丢掉低密度、重复或与前后文几乎无关联的内容。"""
@@ -2984,8 +3115,11 @@ class Memory5(Star):
                 continue
             units, chars = tokens[idx]
             ratio = len(chars) / max(1, units)
-            other_tokens = all_tokens - rel_tokens[idx]
-            related = bool(rel_tokens[idx] & other_tokens)
+            near_tokens = set()
+            for near in range(max(0, idx - 2), min(len(rows), idx + 3)):
+                if near != idx:
+                    near_tokens |= rel_tokens[near]
+            related = bool(rel_tokens[idx] & near_tokens)
             if ratio < 0.3:
                 removed += 1
                 self._filter_stats["density"] += 1
@@ -3008,25 +3142,65 @@ class Memory5(Star):
         }
         return out, removed
 
+    def _restore_archive_context(self, all_rows: list[dict], kept: list[dict]) -> list[dict]:
+        """Keep one adjacent message around a kept row when it is close in time."""
+        if not kept:
+            return kept
+        positions = {id(row): i for i, row in enumerate(all_rows)}
+        keep_idx = {positions[id(row)] for row in kept if id(row) in positions}
+        for pos in list(keep_idx):
+            for near in (pos - 1, pos + 1):
+                if near < 0 or near >= len(all_rows) or near in keep_idx:
+                    continue
+                text = str(all_rows[near].get("text", "")).strip()
+                if len(text) < 3:
+                    continue
+                a = parse_dt(str(all_rows[pos].get("ts", "")))
+                b = parse_dt(str(all_rows[near].get("ts", "")))
+                if a and b and abs((a - b).total_seconds()) > 180:
+                    continue
+                keep_idx.add(near)
+        return [all_rows[i] for i in sorted(keep_idx)]
+
+    def _prepare_archive_rows(self, rows: list[dict]) -> tuple[list[dict], int, list[dict]]:
+        cleaned = self._clean_archive_rows(rows)
+        if not self._should_filter_density():
+            return cleaned, 0, cleaned
+        filtered, removed = self._filter_low_density(cleaned)
+        restored = self._restore_archive_context(cleaned, filtered)
+        return restored, removed, cleaned
+
     async def _summarize(self, rows: list[dict]) -> list[dict]:
         provider = self.context.get_using_provider()
         if not provider or not hasattr(provider, "text_chat"):
             logger.warning("memory5: 没有可用的模型提供商（可能还在启动中），本批跳过")
             self._set_archive_status(False, "没有可用的模型提供商")
             return []
-        rows, removed = self._filter_low_density(rows[-150:])
+        rows, removed, cleaned = await asyncio.to_thread(self._prepare_archive_rows, rows)
         if removed:
+            kept_ids = {id(row) for row in rows}
+            self._last_filtered_texts = {
+                self._normalize_compare(self._normalize_time(str(row.get("text", ""))))
+                for row in cleaned if id(row) not in kept_ids
+            }
             pending = getattr(self, "_pending_context_clean", set())
             pending |= getattr(self, "_last_filtered_texts", set())
             self._pending_context_clean = pending
             stats = getattr(self, "_filter_stats", {})
-            logger.info(f"memory5: 归档前过滤 {removed} 条（低密度 {stats.get('density', 0)}，低关联 {stats.get('relevance', 0)}）")
+            logger.info(f"memory5: 归档前过滤 {removed} 条（低密度 {stats.get('density', 0)}，低关联 {stats.get('relevance', 0)}），保留邻接上下文 {len(rows)} 条")
+        # Apply the per-batch cap only after cleanup/filtering so high-signal
+        # older rows are not discarded by an arbitrary raw tail.
+        rows = rows[-150:]
+        if len(rows) < 3:
+            self._set_archive_status(True, "归档前信息量太少，跳过")
+            logger.info("memory5: 归档前信息量太少，跳过本次归档")
+            return []
         lines = []
         for row in rows:
             text = str(row.get("text", "")).replace("\n", " ").strip()
             if not text:
                 continue
-            lines.append(f"[{row.get('ts')}] {row.get('name')}({row.get('qq')}): {text[:200]}")
+            lines.append(f"[{row.get('ts')}] {row.get('name')}({row.get('qq')}): {text[:100]}")
         if not lines:
             return []
         prompt = EXTRACT_PROMPT + "\n".join(lines)
@@ -3054,7 +3228,7 @@ class Memory5(Star):
         batches = self._int("archive_max_batches", 8)
         for _ in range(batches):
             cursor = read_json(paths["cursor"], {})
-            rows = raw_since(scope, cursor)
+            rows = await asyncio.to_thread(raw_since, scope, cursor)
             if len(rows) < 3:
                 break
             total += await self._extract_batch(scope, rows)
@@ -3119,12 +3293,16 @@ class Memory5(Star):
                 if isinstance(alias, dict):
                     aliases.append(alias)
 
-        # seq 由 append_entries 统一分配（每个文件只读一次）
+        await asyncio.to_thread(self._persist_extracted, scope, entries, aliases)
+        logger.info(f"memory5: {scope} 本批 {len(entries)} 条（{len(rows)} 条消息）")
+        return len(entries)
 
+    def _persist_extracted(self, scope: str, entries: list[dict], aliases: list[dict]) -> None:
+        """Persist one extracted batch in a worker thread; semantics unchanged."""
+        paths = scope_paths(scope)
         important = [e for e in entries if e["tag"] == "重要"]
         remind = [e for e in entries if e["tag"] == "提醒"]
         daily = [e for e in entries if e["tag"] in ("普通", "低密度")]
-
         append_entries(scope, daily)
         if important:
             existing = read_jsonl(paths["important"])
@@ -3149,9 +3327,6 @@ class Memory5(Star):
             write_jsonl(paths["remind"], existing)
         if aliases:
             update_aliases(scope, aliases)
-
-        logger.info(f"memory5: {scope} 本批 {len(entries)} 条（{len(rows)} 条消息）")
-        return len(entries)
 
     def extract_times(self) -> list[tuple[int, int]]:
         raw = str(self._get("extract_times", "04:05,16:05"))
@@ -4318,6 +4493,14 @@ class Memory5(Star):
         return text
 
     async def terminate(self) -> None:
+        raw_task = getattr(self, "_raw_task", None)
+        raw_queue = getattr(self, "_raw_queue", None)
+        if raw_task is not None and raw_queue is not None:
+            try:
+                await asyncio.wait_for(raw_queue.put(None), timeout=2)
+                await asyncio.wait_for(raw_task, timeout=10)
+            except Exception:
+                raw_task.cancel()
         tasks = [self._task, self._extract_task, getattr(self, "_empty_task", None)]
         tasks.extend(getattr(self, "_bg_tasks", []))
         for task in tasks:

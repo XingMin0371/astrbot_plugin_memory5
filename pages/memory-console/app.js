@@ -299,6 +299,7 @@ function renderEntries(rows, source) {
       `<span>${esc(row.subject || "")}</span>` +
       `<span>${esc(row.topic || "")}</span>` +
       `<span>${esc(row.date || "")}</span>` +
+      (row.best ? `<span class="best-badge">今日最佳</span>` : "") +
       (row.due ? `<span>到期 ${esc(row.due)}</span>` : "");
     const text = document.createElement("div");
     text.className = "text";
@@ -983,10 +984,12 @@ async function boot() {
     refresh();
   });
   $("reload").onclick = async () => {
-    state.dates = {};
-    const res = unwrap(await apiGet("bootstrap")) || {};
-    state.dates[sel.value] = res.dates?.[sel.value] || [];
-    fillDaySelect(state.dates[sel.value]);
+    // Reload the selected scope's dates directly.  Bootstrap only returns
+    // dates for the first scope, which used to reset the picker to yesterday
+    // and caused 8/7 flipping when another scope was selected.
+    const days = await loadDays(sel.value);
+    state.dates[sel.value] = days;
+    fillDaySelect(days);
     await refresh();
   };
   $("addBtn").onclick = showAddForm;

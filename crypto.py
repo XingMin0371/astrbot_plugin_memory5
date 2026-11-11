@@ -24,6 +24,7 @@ import json
 import os
 import secrets
 import shutil
+import threading
 import time
 from collections import OrderedDict
 
@@ -160,6 +161,7 @@ _TEXT_CACHE: "OrderedDict[str, tuple[tuple[int, int], str, bool]]" = OrderedDict
 _CACHE_MAX_FILES = 512
 _CACHE_MAX_BYTES = 64 * 1024 * 1024
 _CACHE_BYTES = 0
+_CACHE_LOCK = threading.RLock()
 _BAD_LINES = {}
 _KEY_LOADED = False
 _PLAIN_WARNED = False
@@ -561,9 +563,10 @@ def is_encrypted_bytes(data: bytes) -> bool:
 def _cache_drop(path: str) -> None:
     """写入后让缓存失效；只影响内存，不影响磁盘数据。"""
     global _CACHE_BYTES
-    hit = _TEXT_CACHE.pop(path, None)
-    if hit is not None:
-        _CACHE_BYTES -= len(hit[1])
+    with _CACHE_LOCK:
+        hit = _TEXT_CACHE.pop(path, None)
+        if hit is not None:
+            _CACHE_BYTES -= len(hit[1])
 
 
 def _cache_store(path: str, stat_key: tuple[int, int], text: str, encrypted: bool) -> None:
@@ -574,21 +577,23 @@ def _cache_store(path: str, stat_key: tuple[int, int], text: str, encrypted: boo
     global _CACHE_BYTES
     if len(text) > 4 * 1024 * 1024:
         return
-    old = _TEXT_CACHE.pop(path, None)
-    if old is not None:
-        _CACHE_BYTES -= len(old[1])
-    while _TEXT_CACHE and (len(_TEXT_CACHE) >= _CACHE_MAX_FILES
-                           or _CACHE_BYTES + len(text) > _CACHE_MAX_BYTES):
-        _, evicted = _TEXT_CACHE.popitem(last=False)
-        _CACHE_BYTES -= len(evicted[1])
-    _TEXT_CACHE[path] = (stat_key, text, encrypted)
-    _CACHE_BYTES += len(text)
+    with _CACHE_LOCK:
+        old = _TEXT_CACHE.pop(path, None)
+        if old is not None:
+            _CACHE_BYTES -= len(old[1])
+        while _TEXT_CACHE and (len(_TEXT_CACHE) >= _CACHE_MAX_FILES
+                               or _CACHE_BYTES + len(text) > _CACHE_MAX_BYTES):
+            _, evicted = _TEXT_CACHE.popitem(last=False)
+            _CACHE_BYTES -= len(evicted[1])
+        _TEXT_CACHE[path] = (stat_key, text, encrypted)
+        _CACHE_BYTES += len(text)
 
 
 def cache_entries(limit: int = 50) -> list[dict]:
     """缓存里当前有哪些文件（按占用从大到小）。"""
-    items = sorted(((path, len(value[1])) for path, value in _TEXT_CACHE.items()),
-                   key=lambda item: -item[1])
+    with _CACHE_LOCK:
+        items = sorted(((path, len(value[1])) for path, value in _TEXT_CACHE.items()),
+                       key=lambda item: -item[1])
     out = []
     for path, size in items[:limit]:
         try:
@@ -602,7 +607,9 @@ def cache_entries(limit: int = 50) -> list[dict]:
 def cache_by_scope() -> list[dict]:
     """按会话汇总缓存：同一个群/QQ 的多个日期文件算作一处。"""
     buckets: dict[str, dict] = {}
-    for path, (_stat, text, _enc) in _TEXT_CACHE.items():
+    with _CACHE_LOCK:
+        snapshot = list(_TEXT_CACHE.items())
+    for path, (_stat, text, _enc) in snapshot:
         if not os.path.exists(path):
             continue  # 文件已删除，不再计入
         try:
@@ -623,7 +630,9 @@ def cache_by_scope() -> list[dict]:
 def cache_stats() -> dict:
     files = 0
     size = 0
-    for path, (_stat, text, _enc) in _TEXT_CACHE.items():
+    with _CACHE_LOCK:
+        snapshot = list(_TEXT_CACHE.items())
+    for path, (_stat, text, _enc) in snapshot:
         if os.path.exists(path):
             files += 1
             size += len(text)
@@ -638,10 +647,11 @@ def _load_plain_text(path: str) -> tuple[str, bool]:
     except OSError:
         return "", False
     stat_key = (st.st_mtime_ns, st.st_size)
-    hit = _TEXT_CACHE.get(path)
-    if hit and hit[0] == stat_key:
-        _TEXT_CACHE.move_to_end(path)  # LRU：命中的挪到队尾
-        return hit[1], hit[2]
+    with _CACHE_LOCK:
+        hit = _TEXT_CACHE.get(path)
+        if hit and hit[0] == stat_key:
+            _TEXT_CACHE.move_to_end(path)  # LRU：命中的挪到队尾
+            return hit[1], hit[2]
     try:
         with open(path, "rb") as fh:
             data = fh.read()
@@ -666,7 +676,8 @@ def _load_plain_text(path: str) -> tuple[str, bool]:
                     good.append(decrypt_line(line))
                 except Exception:
                     bad += 1
-            _BAD_LINES[path] = bad
+            with _CACHE_LOCK:
+                _BAD_LINES[path] = bad
             text = "\n".join(good) + ("\n" if good else "")
             encrypted = True
 

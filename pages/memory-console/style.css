@@ -141,3 +141,4 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 #bulkPanel .actions { justify-content: center; }
 
 .row .push-right { margin-left: auto; }
+.best-badge { padding: 1px 6px; border-radius: 6px; background: #fef3c7; color: #92400e; font-weight: 600; }
