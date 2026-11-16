@@ -2868,6 +2868,82 @@ class Memory5(Star):
             )
         return changed
 
+
+    @staticmethod
+    def _sanitize_tool_context(req) -> None:
+        """Final request-level guard for memory5-only installs."""
+        messages = getattr(req, "contexts", None)
+        if not isinstance(messages, list):
+            return
+        result_ids = {
+            str(msg.get("tool_call_id"))
+            for msg in messages
+            if isinstance(msg, dict)
+            and msg.get("role") == "tool"
+            and msg.get("tool_call_id")
+        }
+        cleaned = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                cleaned.append(msg)
+                continue
+            if msg.get("role") == "assistant":
+                calls = msg.get("tool_calls")
+                if calls is not None:
+                    valid = []
+                    if isinstance(calls, list):
+                        for call in calls:
+                            if not isinstance(call, dict):
+                                continue
+                            cid = call.get("id")
+                            fn = call.get("function")
+                            if not isinstance(cid, str) or not cid:
+                                continue
+                            if not isinstance(fn, dict) or not fn.get("name"):
+                                continue
+                            if cid not in result_ids:
+                                continue
+                            valid.append(call)
+                    if valid:
+                        msg["tool_calls"] = valid
+                        if "deepseek" in str(getattr(req, "model", "") or "").lower() and msg.get("reasoning_content") is None:
+                            msg["reasoning_content"] = ""
+                    else:
+                        msg.pop("tool_calls", None)
+                content = msg.get("content")
+                empty_content = content is None or content == "" or content == []
+                if not msg.get("tool_calls") and empty_content:
+                    if msg.get("reasoning_content"):
+                        msg["content"] = ""
+                    else:
+                        continue
+            cleaned.append(msg)
+
+        pending = set()
+        final = []
+        for msg in cleaned:
+            if not isinstance(msg, dict):
+                final.append(msg)
+                pending = set()
+                continue
+            role = msg.get("role")
+            if role == "assistant" and msg.get("tool_calls"):
+                pending = {
+                    str(call.get("id"))
+                    for call in msg["tool_calls"]
+                    if isinstance(call, dict) and call.get("id")
+                }
+                final.append(msg)
+            elif role == "tool":
+                cid = str(msg.get("tool_call_id") or "")
+                if cid and cid in pending:
+                    pending.remove(cid)
+                    final.append(msg)
+            else:
+                pending = set()
+                final.append(msg)
+        req.contexts = final
+
     @filter.on_llm_request()
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         try:
@@ -2927,6 +3003,11 @@ class Memory5(Star):
                     logger.warning("memory5: 临时消息通道不可用，跳过动态记忆注入")
         except Exception as exc:  # 记忆出错不影响对话
             logger.warning(f"memory5: 注入跳过 ({type(exc).__name__}: {exc})")
+        finally:
+            try:
+                self._sanitize_tool_context(req)
+            except Exception:
+                pass
 
     # ---------------------------------------------------------- extraction
     _STOP_CHARS = set("我你他她它的了是在有和就都一个上也很到说要去会着没有好这那不们吗呢吧啊哦嗯哈呀嘛")
