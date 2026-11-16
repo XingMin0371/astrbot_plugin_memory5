@@ -2770,9 +2770,12 @@ class Memory5(Star):
                 kept = [c for c in calls if str(c.get("id") or c.get("tool_call_id") or "") != cid]
                 if len(kept) == len(calls):
                     continue
-                assistant["tool_calls"] = kept
-                if not kept and not self._context_text(assistant).strip():
-                    drop.add(ai)
+                if kept:
+                    assistant["tool_calls"] = kept
+                else:
+                    assistant.pop("tool_calls", None)
+                    if not self._context_text(assistant).strip():
+                        drop.add(ai)
         kept = [m for i, m in enumerate(contexts) if i not in drop]
         if len(kept) != len(contexts):
             req.contexts = kept
