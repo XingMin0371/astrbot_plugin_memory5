@@ -1010,6 +1010,7 @@ class Memory5WebUI(_TasksMixin):
             ("/memory5/purge", self.purge, ["POST"], "彻底删除"),
             ("/memory5/purge-scope", self.purge_scope, ["POST"], "清空某范围"),
             ("/memory5/archive", self.archive, ["POST"], "立即归档"),
+            ("/memory5/migrate-topics", self.migrate_topics, ["POST"], "升级标签"),
             ("/memory5/add", self.add, ["POST"], "手动新增记忆"),
             ("/memory5/tasks", self.tasks, ["GET"], "定时任务列表"),
             ("/memory5/task-save", self.task_save, ["POST"], "保存定时任务"),
@@ -1334,6 +1335,16 @@ class Memory5WebUI(_TasksMixin):
         await asyncio.to_thread(shutil.move, target, os.path.join(TRASH_DIR, f"scope-{stamp}"))
         self._invalidate_dates(scope)
         return jsonify({"status": "ok"})
+
+    async def migrate_topics(self):
+        """手动触发旧 topic 到新标签的迁移；在工作线程执行。"""
+        try:
+            changed = await self.plugin.run_topic_migration()
+            message = f"已迁移 {changed} 个文件" if changed else "没有需要迁移的旧标签"
+            return jsonify({"status": "ok", "message": message, "changed": changed})
+        except Exception as exc:
+            logger.warning(f"memory5: 标签升级失败 {type(exc).__name__}: {exc}")
+            return jsonify({"status": "error", "message": f"标签升级失败：{exc}"}), 500
 
     async def archive(self):
         """手动触发一次归档；只在面板里可用，不暴露成聊天指令。"""
