@@ -433,46 +433,43 @@ class _TasksMixin:
         return jsonify({"status": "ok", "data": {"removed": removed, "moved": moved}})
 
     def _move_entries(self, scope: str, rows: list[dict], target: str, day: str = "") -> int:
-        """把条目改成目标等级；返回移动条数。"""
+        """Move entries in batches: each target file is read/written once."""
         if target not in ("重要", "普通", "低密度"):
             raise ValueError("目标等级只支持 重要/普通/低密度")
         moved = 0
-        important = None
-        important_seq = 0
-        for row in rows:
-            item = dict(row)
-            item["tag"] = target
-            if target == "重要":
-                imp_path = os.path.join(scope_dir(scope), "important.jsonl")
-                if important is None:
-                    important = read_jsonl(imp_path)
-                    important_seq = max([int(r.get("seq") or 0) for r in important] or [0])
+        if target == "重要":
+            imp_path = os.path.join(scope_dir(scope), "important.jsonl")
+            important = read_jsonl(imp_path)
+            important_seq = max([int(r.get("seq") or 0) for r in important] or [0])
+            for row in rows:
+                item = dict(row)
+                item["tag"] = target
                 important_seq += 1
                 item["seq"] = important_seq
                 important.append(item)
-            else:
-                row_day = str(item.get("date") or day)
-                daily_path = entries_path(scope, "daily", row_day)
-                bucket = read_jsonl(daily_path)
-                item["date"] = row_day
-                item["seq"] = max([int(r.get("seq") or 0) for r in bucket] or [0]) + 1
-                bucket.append(item)
-                write_jsonl(daily_path, bucket)
-            moved += 1
-        if important is not None:
-            write_jsonl(os.path.join(scope_dir(scope), "important.jsonl"), important)
-        return moved
+                moved += 1
+            if moved:
+                write_jsonl(imp_path, important)
+            return moved
 
-    async def export(self):
-        scope = (request.args.get("scope") or "").strip()
-        fmt = (request.args.get("format") or "json").strip().lower()
-        device = (request.args.get("device") or "").strip()[:32]
-        start = (request.args.get("start") or "").strip()
-        end = (request.args.get("end") or "").strip()
-        if not scope:
-            raise ValueError("缺少 scope")
-        data = await asyncio.to_thread(self._export_payload, scope, fmt, device, start, end)
-        return jsonify({"status": "ok", "data": data})
+        buckets: dict[str, list[dict]] = {}
+        seqs: dict[str, int] = {}
+        for row in rows:
+            item = dict(row)
+            item["tag"] = target
+            row_day = str(item.get("date") or day)
+            daily_path = entries_path(scope, "daily", row_day)
+            if daily_path not in buckets:
+                buckets[daily_path] = read_jsonl(daily_path)
+                seqs[daily_path] = max([int(r.get("seq") or 0) for r in buckets[daily_path]] or [0])
+            item["date"] = row_day
+            seqs[daily_path] += 1
+            item["seq"] = seqs[daily_path]
+            buckets[daily_path].append(item)
+            moved += 1
+        for path, bucket in buckets.items():
+            write_jsonl(path, bucket)
+        return moved
 
     def _export_payload(self, scope: str, fmt: str, device: str, start: str, end: str) -> dict:
         def in_range(day: str) -> bool:
