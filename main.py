@@ -342,7 +342,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.7.4"
+VERSION = "2.7.5"
 TOPIC_SCHEMA_VERSION = "2"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
@@ -480,18 +480,15 @@ def dedupe_scope(scope: str, dry_run: bool = False) -> list[dict]:
     remind = read_jsonl(paths["remind"])
     # 提醒内部去重：同一 QQ + 同一到期分钟 + 相似内容 只留一条
     deduped_remind: list[dict] = []
+    remind_buckets: dict[tuple[str, str], list[dict]] = {}
     for row in remind:
-        duplicated = False
-        for kept in deduped_remind:
-            if (
-                str(row.get("subject")) == str(kept.get("subject"))
-                and str(row.get("due", ""))[:16] == str(kept.get("due", ""))[:16]
-                and _similar(row.get("text", ""), kept.get("text", ""))
-            ):
-                duplicated = True
-                break
+        subject = str(row.get("subject"))
+        due_minute = str(row.get("due", ""))[:16]
+        bucket = remind_buckets.setdefault((subject, due_minute), [])
+        duplicated = any(_similar(row.get("text", ""), kept.get("text", "")) for kept in bucket)
         if not duplicated:
             deduped_remind.append(row)
+            bucket.append(row)
     remind_dupes = len(remind) - len(deduped_remind)
     remind = deduped_remind
     for idx, row in enumerate(remind):
@@ -519,12 +516,12 @@ def dedupe_scope(scope: str, dry_run: bool = False) -> list[dict]:
 
     entries.sort(key=lambda e: DEDUP_RANK.get(e["tier"], 0), reverse=True)
     winners: list[dict] = []
+    winners_by_subject: dict[str, list[dict]] = {}
     dropped: list[dict] = []
     for entry in entries:
         conflict = None
-        for keep in winners:
-            if str(entry["subject"]) != str(keep["subject"]):
-                continue
+        subject = str(entry["subject"])
+        for keep in winners_by_subject.get(subject, []):
             if {entry["tier"], keep["tier"]} == {"core", "remind"}:
                 continue  # 长期和提醒是两种用途，都留
             if _similar(entry["text"], keep["text"]):
@@ -537,6 +534,7 @@ def dedupe_scope(scope: str, dry_run: bool = False) -> list[dict]:
             })
             continue
         winners.append(entry)
+        winners_by_subject.setdefault(subject, []).append(entry)
 
     if dry_run:
         return dropped
@@ -1196,7 +1194,7 @@ EXTRACT_PROMPT = """下面是你今天经历的 QQ 群/私聊聊天。请用你�
 
 
 # ------------------------------------------------------------------- plugin
-@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.7.0")
+@register("memory5", "DSH", "鱼鱼日记 · 如鱼所书：分层日记 + 面板 + 提醒 + 定时任务", "2.7.5")
 class Memory5(Star):
     def __init__(self, context: Context, config=None) -> None:
         super().__init__(context)
@@ -3197,12 +3195,12 @@ class Memory5(Star):
             seen_ctx, cutoff = self._mark_context_seen(scope or "", contexts if isinstance(contexts, list) else [], now)
             if placeholder_due:
                 self._remove_placeholder_context(req, scope or "", seen_ctx, now)
-            self._trim_tool_context(req, allow_cleanup, scope or "")
+            await asyncio.to_thread(self._trim_tool_context, req, allow_cleanup, scope or "")
             # Archive-triggered pending cleanup is the original behavior.
             # Only the low-density context cleanup has its own switch.
             self._clean_pending_context(req, allow_cleanup, scope or "", seen_ctx, cutoff)
             if bool(self._get("low_context_clean", True)) and scope:
-                self._clean_context_low(req, scope, allow_cleanup, seen_ctx, cutoff)
+                await asyncio.to_thread(self._clean_context_low, req, scope, allow_cleanup, seen_ctx, cutoff)
             if not self.enabled_inject:
                 return
             if not scope:
@@ -3542,28 +3540,28 @@ class Memory5(Star):
         total = 0
         batches = self._int("archive_max_batches", 8)
         for _ in range(batches):
-            cursor = read_json(paths["cursor"], {})
+            cursor = await asyncio.to_thread(read_json, paths["cursor"], {})
             rows = await asyncio.to_thread(raw_since, scope, cursor)
             if len(rows) < 3:
                 break
             total += await self._extract_batch(scope, rows)
             last = str(rows[-1].get("ts", "")) if isinstance(rows[-1], dict) else str(rows[-1][0])
-            write_json(paths["cursor"], {"last_ts": last})
+            await asyncio.to_thread(write_json, paths["cursor"], {"last_ts": last})
             if len(rows) < 200:
                 break
         if total:
             if bool(self._get("dedupe_enable", True)):
-                removed = dedupe_scope(scope)
+                removed = await asyncio.to_thread(dedupe_scope, scope)
                 if removed:
                     logger.info(f"memory5: {scope} 跨标签去重 {len(removed)} 条")
             try:
-                renumbered = renumber_scope(scope)
+                renumbered = await asyncio.to_thread(renumber_scope, scope)
                 if renumbered:
                     logger.info(f"memory5: {scope} 序号已整理（{renumbered} 条）")
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f"memory5: 重排序号跳过 {type(exc).__name__}: {exc}")
             try:
-                refresh_index(scope)
+                await asyncio.to_thread(refresh_index, scope)
             except Exception:  # noqa: BLE001
                 pass
         return total
