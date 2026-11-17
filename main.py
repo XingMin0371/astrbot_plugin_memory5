@@ -260,6 +260,14 @@ TOPIC_CANON = {
     "喜好与能力": "喜好", "自由偏好": "喜好",
     "聊天": "社交", "回应": "社交",
     "担心": "心情",
+    "暗号": "隐私", "亲密": "私密", "陪伴": "关系", "拒绝权": "边界",
+    "心声": "聊天", "余额": "经济", "上网": "娱乐", "项目": "工作",
+    "清理": "其他", "合并": "其他", "故事": "娱乐", "指令": "其他",
+    "防骗": "边界", "备份": "技术", "习惯": "日常",
+    "在家办公": "工作", "饮食投喂": "饮食", "服务器": "技术",
+    "新链路": "技术", "插件升级": "技术", "复试学习": "学习",
+    "游戏喜好": "游戏", "零食作息": "饮食", "群友近况": "社交",
+    "理财": "经济", "项目工具": "技术", "面试考核": "工作",
 }
 
 TOPIC_ALIASES = {
@@ -315,7 +323,7 @@ TOPIC_ALIASES = {
     "其他": (),
 }
 RECALL_WORDS = ("还记得", "记不记得", "记得吗", "以前", "之前", "上次", "那次", "想起来", "回忆", "我说过", "答应过", "最近", "后来", "当时", "现在")
-CORE_ALWAYS_TOPICS = {"身份", "称呼", "关系", "底线", "保密", "隐私", "私密", "主人", "权限", "管理员", "约定", "日记约定", "相处", "边界", "原则", "性格", "自我", "价值", "愿望", "伴侣", "昵称", "纪念", "聊天", "日记", "记忆", "群主", "脱敏", "防钓鱼", "回应"}
+CORE_ALWAYS_TOPICS = {"身份", "称呼", "关系", "边界", "隐私", "私密", "原则", "性格"}
 CORE_TOPIC_GROUPS = (
     ("主人", "身份", "称呼", "关系", "权限", "管理员", "群主", "昵称", "伴侣", "相处", "回应", "防钓鱼"),
     ("底线", "保密", "隐私", "私密", "原则", "边界", "脱敏"),
@@ -637,6 +645,79 @@ def scope_paths(scope: str) -> dict:
         "cursor": os.path.join(base, "cursor.json"),
         "trash": os.path.join(MEM_ROOT, "trash"),
     }
+
+
+def migrate_topics() -> int:
+    """Normalize legacy core/important/remind/daily topics to the new schema.
+
+    Idempotent.  Runs at startup so every installation, not just this one,
+    migrates old topic names without touching entry text or dates.
+    """
+    if not os.path.isdir(MEM_ROOT):
+        return 0
+    changed = 0
+    for name in os.listdir(MEM_ROOT):
+        if not (name.startswith("group_") or name.startswith("private_")):
+            continue
+        scope = name.replace("_", ":", 1)
+        try:
+            paths = scope_paths(scope)
+        except ValueError:
+            continue
+        core_path = paths["core"]
+        if os.path.exists(core_path):
+            lines = read_text(core_path).splitlines()
+            out = []
+            local = 0
+            for line in lines:
+                matched = CORE_LINE_RE.match(line.strip())
+                if matched:
+                    old_topic = matched.group("topic")
+                    new_topic = TOPIC_CANON.get(old_topic, old_topic if old_topic in TOPIC_ORDER else "其他")
+                    if new_topic != old_topic:
+                        line = line.replace(f"[{old_topic}]", f"[{new_topic}]", 1)
+                        local += 1
+                out.append(line)
+            if local:
+                write_text(core_path, "\n".join(out) + "\n")
+                changed += 1
+        for key in ("important", "remind"):
+            path = paths[key]
+            if not os.path.exists(path):
+                continue
+            rows = read_jsonl(path)
+            local = 0
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                old_topic = str(row.get("topic", "")).strip()
+                new_topic = TOPIC_CANON.get(old_topic, old_topic if old_topic in TOPIC_ORDER else "其他")
+                if new_topic != old_topic:
+                    row["topic"] = new_topic
+                    local += 1
+            if local:
+                write_jsonl(path, rows)
+                changed += 1
+        daily_dir = paths["daily_dir"]
+        if os.path.isdir(daily_dir):
+            for file_name in os.listdir(daily_dir):
+                if not file_name.endswith(".jsonl"):
+                    continue
+                path = os.path.join(daily_dir, file_name)
+                rows = read_jsonl(path)
+                local = 0
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    old_topic = str(row.get("topic", "")).strip()
+                    new_topic = TOPIC_CANON.get(old_topic, old_topic if old_topic in TOPIC_ORDER else "其他")
+                    if new_topic != old_topic:
+                        row["topic"] = new_topic
+                        local += 1
+                if local:
+                    write_jsonl(path, rows)
+                    changed += 1
+    return changed
 
 
 def daily_file(scope: str, day: str) -> str:
@@ -2355,9 +2436,8 @@ class Memory5(Star):
                 matched = CORE_LINE_RE.match(line.strip())
                 if matched:
                     topic = matched.group("topic")
-                    always = topic in CORE_ALWAYS_TOPICS or "约定" in topic or any(
-                        word in topic for word in ("身份", "称呼", "关系", "底线", "保密", "私密", "主人", "权限", "管理员")
-                    )
+                    canonical_topic = TOPIC_CANON.get(topic, topic)
+                    always = canonical_topic in CORE_ALWAYS_TOPICS
                     if not always:
                         entry = {
                             "topic": topic,
@@ -4547,6 +4627,12 @@ class Memory5(Star):
                 logger.info(f"memory5: 已把 {converted} 个文件迁移到 {crypto_version()} 格式")
         except Exception as exc:  # 单个坏文件不能拖垮整个插件
             logger.warning(f"memory5: 加密迁移跳过 {type(exc).__name__}: {exc}")
+        try:
+            migrated_topics = migrate_topics()
+            if migrated_topics:
+                logger.info(f"memory5: 已迁移 {migrated_topics} 个文件的旧 topic 到新标签")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"memory5: topic 迁移跳过 {type(exc).__name__}: {exc}")
         self._publish_security_status()
         self._maybe_rotate_key()
         self._write_backup_policy()
