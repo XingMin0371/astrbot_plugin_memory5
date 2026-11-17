@@ -229,36 +229,99 @@ TZ = timezone(timedelta(hours=8))
 # Internal cache protection; intentionally not exposed as separate settings.
 CACHE_GUARD_MINUTES = 25
 CACHE_PREFIX_MESSAGES = 24
-PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线"}
-SENSITIVE_TOPICS = {"私密", "亲密", "身体", "底线", "保密", "隐私", "密码"}
+PERSONA_TOPICS = {"身份", "称呼", "关系", "性格", "人格", "设定", "语气", "说话风格", "习惯", "偏好", "原则", "底线", "相处", "边界", "隐私", "自我", "价值", "愿望", "伴侣", "昵称", "纪念", "聊天", "日记", "记忆"}
+SENSITIVE_TOPICS = {"私密", "亲密", "身体", "底线", "保密", "隐私", "密码", "边界", "脱敏"}
+
+TOPIC_ORDER = (
+    "身份", "称呼", "关系", "边界", "隐私", "私密", "原则", "性格",
+    "喜好", "作息", "饮食", "工作", "学习", "健康", "家庭", "经济",
+    "游戏", "动漫", "技术", "社交", "娱乐", "日常", "约定", "事件",
+    "心情", "其他",
+)
+TOPIC_STABILITY_ORDER = (
+    "身份", "称呼", "关系", "边界", "隐私", "私密", "原则", "性格",
+    "喜好", "工作", "学习", "健康", "家庭", "经济", "技术",
+    "作息", "饮食", "游戏", "动漫", "社交", "娱乐", "日常",
+    "约定", "事件", "心情", "其他",
+)
+
+TOPIC_CANON = {
+    "主人": "身份", "群主": "身份", "权限": "身份", "管理员": "身份",
+    "昵称": "称呼",
+    "伴侣": "关系", "相处": "关系", "相处观": "关系",
+    "底线": "边界", "雷点": "边界", "防钓鱼": "边界",
+    "保密": "隐私", "脱敏": "隐私", "日记隐私": "隐私",
+    "规则": "原则", "价值": "原则",
+    "自我": "性格",
+    "理想": "其他", "愿望": "其他", "记忆": "其他", "日记": "其他",
+    "归档流程": "其他", "查询习惯": "其他", "回复规则": "其他",
+    "图片规则": "其他", "日记本": "其他", "日记约定": "约定",
+    "近况": "日常", "生活": "日常", "纪念": "日常",
+    "喜好与能力": "喜好", "自由偏好": "喜好",
+    "聊天": "社交", "回应": "社交",
+    "担心": "心情",
+}
 
 TOPIC_ALIASES = {
     "称呼": ("叫法", "名字", "怎么叫", "昵称", "外号"),
-    "身份": ("身份", "是谁", "什么身份", "干什么的"),
-    "关系": ("关系", "什么关系", "认识", "怎么称呼"),
-    "喜好": ("喜欢", "爱吃", "偏好", "爱好", "讨厌"),
+    "身份": ("身份", "是谁", "什么身份", "干什么的", "群主", "管理员"),
+    "关系": ("关系", "什么关系", "认识", "怎么称呼", "相处", "伴侣", "朋友"),
+    "喜好": ("喜欢", "爱吃", "偏好", "爱好", "讨厌", "感兴趣"),
     "偏好": ("喜欢", "爱吃", "偏好", "爱好"),
-    "习惯": ("习惯", "经常", "总是", "平时"),
-    "作息": ("睡觉", "起床", "作息", "熬夜", "几点睡"),
-    "约定": ("答应", "说好", "约好", "以后", "承诺"),
+    "习惯": ("习惯", "经常", "总是", "平时", "作息"),
+    "作息": ("睡觉", "起床", "作息", "熬夜", "几点睡", "通宵"),
+    "饮食": ("吃", "喝", "饭", "菜", "零食", "饿", "投喂", "奶茶"),
+    "工作": ("工作", "上班", "实习", "面试", "项目", "公司", "职业"),
+    "学习": ("学习", "考试", "复习", "上课", "学校", "面试", "专业"),
+    "健康": ("身体", "生病", "医院", "熬夜", "累", "疼", "神经衰弱", "休息"),
+    "家庭": ("家人", "父母", "爸妈", "家里", "老家"),
+    "经济": ("钱", "工资", "买", "卖", "投资", "仓", "理财", "余额", "消费"),
+    "游戏": ("游戏", "玩", "副本", "开黑", "抽卡", "绝区零", "货币战争"),
+    "动漫": ("番", "动漫", "动画", "漫画", "假面骑士", "终末地"),
+    "技术": ("技术", "代码", "报错", "插件", "配置", "服务器", "模型", "工具"),
+    "社交": ("群友", "聊天", "说话", "认识", "一起", "回应", "接话"),
+    "娱乐": ("视频", "B站", "直播", "电影", "音乐", "看片", "娱乐", "表情包"),
+    "日常": ("近况", "今天", "最近", "平常", "生活", "早上", "晚上", "刚才"),
+    "约定": ("答应", "说好", "约好", "以后", "承诺", "约"),
     "提醒": ("提醒", "记得", "别忘了", "到点"),
     "归档": ("归档", "整理", "记忆", "日记"),
     "查询": ("查询", "查", "联网", "搜索", "看一下"),
     "余额查询": ("余额", "查余额", "还有多少钱", "余额多少"),
     "底线": ("底线", "不可以", "禁止", "别", "不能"),
-    "保密": ("保密", "私密", "不能说", "别告诉", "秘密"),
-    "私密": ("私密", "亲密", "身体", "不能对外说"),
-    "事件": ("事件", "发生", "那次", "当时"),
-    "性格": ("性格", "脾气", "为人"),
+    "边界": ("边界", "底线", "不可以", "禁止", "不能", "隐私"),
+    "保密": ("保密", "私密", "不能说", "别告诉", "秘密", "脱敏"),
+    "隐私": ("隐私", "私密", "不能对外说", "个人信息", "住址", "联系方式"),
+    "私密": ("私密", "亲密", "身体", "不能对外说", "隐私"),
+    "事件": ("事件", "发生", "那次", "当时", "事情", "突然"),
+    "心情": ("心情", "开心", "难受", "烦", "生气", "委屈", "低落", "情绪"),
+    "性格": ("性格", "脾气", "为人", "嘴硬", "心软"),
+    "相处": ("相处", "怎么对我", "关系", "一起"),
+    "原则": ("原则", "规则", "规矩", "应该", "底线", "不能"),
+    "规则": ("规则", "原则", "规矩", "应该", "不能"),
+    "记忆": ("记忆", "日记", "记得", "忘了", "想起来"),
+    "日记": ("日记", "记忆", "记下来"),
+    "自我": ("自我", "自己", "我是", "我是谁", "想成为"),
+    "价值": ("价值", "在意", "重要", "想成为"),
+    "愿望": ("愿望", "想要", "希望", "理想", "以后想"),
+    "理想": ("理想", "愿望", "想成为", "以后想"),
+    "伴侣": ("伴侣", "喜欢的人", "关系", "陪"),
+    "昵称": ("昵称", "名字", "外号", "叫我", "称呼"),
+    "纪念": ("纪念", "第一次", "周年", "纪念日"),
+    "近况": ("近况", "今天", "最近", "现在", "刚刚"),
+    "喜好与能力": ("喜欢", "爱吃", "会", "能力", "擅长", "比价"),
+    "群聊": ("群聊", "群里", "接话", "回应"),
+    "雷点": ("雷点", "反感", "不喜欢", "忌讳", "别"),
+    "生活": ("生活", "日常", "近况", "住", "作息"),
+    "其他": (),
 }
-RECALL_WORDS = ("还记得", "记不记得", "记得吗", "以前", "之前", "上次", "那次", "想起来", "回忆", "我说过", "答应过")
-CORE_ALWAYS_TOPICS = {"身份", "称呼", "关系", "底线", "保密", "私密", "主人", "权限", "管理员", "约定", "日记约定"}
+RECALL_WORDS = ("还记得", "记不记得", "记得吗", "以前", "之前", "上次", "那次", "想起来", "回忆", "我说过", "答应过", "最近", "后来", "当时", "现在")
+CORE_ALWAYS_TOPICS = {"身份", "称呼", "关系", "底线", "保密", "隐私", "私密", "主人", "权限", "管理员", "约定", "日记约定", "相处", "边界", "原则", "自我", "价值", "愿望", "伴侣", "昵称", "纪念", "聊天", "日记", "记忆"}
 CORE_TOPIC_GROUPS = (
-    ("主人", "身份", "称呼", "关系", "权限", "管理员"),
-    ("底线", "保密", "私密", "原则"),
-    ("归档流程", "查询习惯", "回复规则", "相处观", "图片规则", "记忆", "脱敏", "日记本"),
+    ("主人", "身份", "称呼", "关系", "权限", "管理员", "群主", "昵称", "伴侣", "相处", "回应", "防钓鱼"),
+    ("底线", "保密", "隐私", "私密", "原则", "边界", "脱敏"),
+    ("归档流程", "查询习惯", "回复规则", "相处观", "图片规则", "记忆", "日记本", "日记", "自我", "价值", "愿望", "纪念", "聊天"),
 )
-CORE_VOLATILE_TOPICS = ("约定", "日记约定", "事件", "喜好", "偏好", "习惯", "作息", "担心", "自由偏好", "日记隐私")
+CORE_VOLATILE_TOPICS = ("约定", "日记约定", "事件", "喜好", "偏好", "习惯", "作息", "饮食", "担心", "心情", "自由偏好", "日记隐私")
 GENERIC_KEYWORDS = {
     "今天", "昨天", "明天", "现在", "时候", "什么", "怎么", "可以", "一个", "我们", "他们",
     "这个", "那个", "没有", "就是", "还是", "因为", "所以", "如果", "然后", "已经", "自己",
@@ -994,7 +1057,7 @@ EXTRACT_PROMPT = """下面是你今天经历的 QQ 群/私聊聊天。请用你�
 
 对每一条输出一个 JSON 对象，字段：
 - subject: 事件主体；谁做了什么就填谁的 QQ 号；多人共同事件、说不清单一主体时填 group，不要硬猜
-- topic: 从这些标签里选一个：身份、称呼、关系、边界、原则、性格、喜好、作息、饮食、工作、学习、健康、家庭、经济、游戏、动漫、技术、社交、娱乐、日常、约定、事件、心情、其他
+- topic: 从这些标签里选一个：身份、称呼、关系、边界、隐私、私密、原则、性格、喜好、作息、饮食、工作、学习、健康、家庭、经济、游戏、动漫、技术、社交、娱乐、日常、约定、事件、心情、其他
 - stability: 必填，衡量这条信息能使用多久。1=短期/易变（临时状态、当天情绪、一次性事件）；2=中期（阶段近况、近期计划、可能变化的偏好）；3=长期（身份、关系、原则、稳定习惯、明确约定）
 - impact: 必填，衡量这条信息的重要程度。1=低（琐事）；2=中（会影响相处）；3=高（长期/边界/原则）；
 - info: 必填，衡量这条信息的信息密度。0=没有信息；1=低（模糊/重复）；2=中（有具体内容）；3=高（信息充分）
@@ -1856,7 +1919,31 @@ class Memory5(Star):
             self._index_snapshot.pop(scope, None)
 
     @staticmethod
+    def _topic_priority(topic: str) -> int:
+        canonical = TOPIC_CANON.get(str(topic or "").strip(), str(topic or "").strip())
+        try:
+            return TOPIC_STABILITY_ORDER.index(canonical)
+        except ValueError:
+            return len(TOPIC_STABILITY_ORDER)
+
+    @staticmethod
+    def _topic_rank(topic: str) -> int:
+        canonical = TOPIC_CANON.get(str(topic or "").strip(), str(topic or "").strip())
+        try:
+            return TOPIC_ORDER.index(canonical)
+        except ValueError:
+            return len(TOPIC_ORDER)
+
+    @staticmethod
     def _core_priority(topic: str) -> int:
+        # Exact topic first.  Substring matching is only a compatibility
+        # fallback for legacy topics such as 称呼关系/相处观; otherwise new
+        # topics like 相处 would also capture 相处观 and reorder core lines.
+        for idx, group in enumerate(CORE_TOPIC_GROUPS):
+            if topic in group:
+                return idx
+        if topic in CORE_VOLATILE_TOPICS:
+            return 9
         for idx, group in enumerate(CORE_TOPIC_GROUPS):
             if any(word in topic for word in group):
                 return idx
@@ -1869,9 +1956,11 @@ class Memory5(Star):
         matched = CORE_LINE_RE.match(line.strip())
         if not matched:
             return (0, "", line)
+        topic = matched.group("topic")
         return (
-            cls._core_priority(matched.group("topic")),
-            matched.group("topic"),
+            cls._topic_priority(topic),
+            cls._topic_rank(topic),
+            topic,
             matched.group("subject"),
             line,
         )
@@ -2076,7 +2165,12 @@ class Memory5(Star):
 
     @staticmethod
     def _entry_keywords(entry: dict) -> list[str]:
-        raw = re.sub(r"\d{5,12}", " ", f"{entry.get('topic', '')} {entry.get('text', '')}")
+        raw = f"{entry.get('topic', '')} {entry.get('text', '')}"
+        # New diary entries carry dates in the text; dates must not become recall keywords.
+        raw = re.sub(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", " ", raw)
+        raw = re.sub(r"\d{1,2}月\d{1,2}日", " ", raw)
+        raw = re.sub(r"\d{1,2}:\d{2}", " ", raw)
+        raw = re.sub(r"\d{5,12}", " ", raw)
         words = set()
         for segment in re.findall(r"[\u4e00-\u9fff]{2,}", raw):
             for size in (2, 3, 4):
@@ -2233,8 +2327,11 @@ class Memory5(Star):
         chunks: list[str] = []
         seen: list[str] = []
 
-        def is_dup(content: str) -> bool:
-            """注入去重：完全相同或互相包含（长度≥8）就算重复。"""
+        def is_dup(content: str, mark: bool = True) -> bool:
+            """注入去重：完全相同或互相包含（长度≥8）就算重复。
+
+            mark=False 只预览，不占用 seen；用于“先判重、再按预算裁剪”。
+            """
             key = _norm_text(content)
             if not key:
                 return True
@@ -2243,7 +2340,8 @@ class Memory5(Star):
                     return True
                 if len(key) >= 12 and len(old) >= 12 and (key in old or old in key):
                     return True
-            seen.append(key)
+            if mark:
+                seen.append(key)
             return False
 
         expand_memory = any(word in text for word in (
@@ -2268,7 +2366,8 @@ class Memory5(Star):
                         }
                         if not self._keyword_hits(entry, text):
                             continue
-                is_dup(matched.group("text") if matched else line)
+                if is_dup(matched.group("text") if matched else line):
+                    continue
                 if not matched or not compact_memory or matched.group("topic") in PERSONA_TOPICS:
                     rendered_core.append(line)
                     continue
@@ -2297,7 +2396,7 @@ class Memory5(Star):
                 if matched.group("subject") not in relevant:
                     continue
                 topic = matched.group("topic")
-                if is_dup(matched.group("text")):
+                if is_dup(matched.group("text"), mark=False):
                     continue
                 if topic == "身份":
                     shared_identity.append(line)
@@ -2316,16 +2415,28 @@ class Memory5(Star):
             used_chars += len(line)
         shared += relation_lines
         if shared:
-            chunks.append("【身份（共享）】\n" + "\n".join(shared))
+            selected_shared = []
+            for line in shared:
+                matched = CORE_LINE_RE.match(line.strip())
+                if matched and is_dup(matched.group("text")):
+                    continue
+                selected_shared.append(line)
+            if selected_shared:
+                chunks.append("【身份（共享）】\n" + "\n".join(selected_shared))
 
         # 重要：匹配当前消息的条目全放（总量由预算兜底），已在长期记忆里的跳过
         important = read_jsonl(scope_paths(scope)["important"])
         recall_intent = any(word in text for word in RECALL_WORDS)
-        picked = [
-            e for e in important
-            if self._match(e, text, sender, scope)
-            and not is_dup(str(e.get("text", "")))
-        ]
+        picked = []
+        preview = set()
+        for e in important:
+            if not self._match(e, text, sender, scope):
+                continue
+            key = _norm_text(str(e.get("text", "")))
+            if key in preview or is_dup(str(e.get("text", "")), mark=False):
+                continue
+            preview.add(key)
+            picked.append(e)
         fallback_used = False
         if not picked:
             candidates = []
@@ -2339,11 +2450,21 @@ class Memory5(Star):
                     continue
                 candidates.append((self._match_score(e, text, sender, scope), str(e.get("date", "")), e))
             candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-            picked = [e for _score, _date, e in candidates if not is_dup(str(e.get("text", "")))][:3]
+            picked = []
+            preview = set()
+            for _score, _date, e in candidates:
+                key = _norm_text(str(e.get("text", "")))
+                if key in preview or is_dup(str(e.get("text", "")), mark=False):
+                    continue
+                preview.add(key)
+                picked.append(e)
+                if len(picked) >= 3:
+                    break
             fallback_used = bool(picked)
         if recall_intent and not fallback_used:
             picked.sort(key=lambda e: str(e.get("date", "")), reverse=True)
             picked = picked[:6]
+        picked.sort(key=lambda e: (self._topic_priority(str(e.get("topic", ""))), self._topic_rank(str(e.get("topic", ""))), str(e.get("date", ""))))
         important_cap = self._int_raw("important_max_chars", 0)
         if important_cap > 0:
             limited, used_chars = [], 0
@@ -2360,10 +2481,13 @@ class Memory5(Star):
                 body = str(entry.get("text", ""))
                 if compact_memory and len(body) > 90:
                     body = body[:90].rstrip() + "…"
+                if is_dup(body):
+                    continue
                 rendered_important.append(
                     f"- {entry.get('subject')} :: {entry.get('topic')}: {body}"
                 )
-            chunks.append("【重要】\n" + "\n".join(rendered_important))
+            if rendered_important:
+                chunks.append("【重要】\n" + "\n".join(rendered_important))
 
         # 提醒：只在触发窗口前后注入，且每个 QQ 最多 5 条
         remind_by_qq: dict[str, list[str]] = {}
@@ -2376,8 +2500,6 @@ class Memory5(Star):
                 if not (start <= now() <= end):
                     continue
                 qq = str(e.get("subject", ""))
-                if is_dup(str(e.get("text", ""))):
-                    continue
                 remind_by_qq.setdefault(qq, []).append(f"- {due.strftime('%m-%d %H:%M')} {e['text']}")
         # 提醒：只按条数限制（每个 QQ 最多 N 条），不再做字符预算
         remind_chunk = ""
@@ -2385,7 +2507,15 @@ class Memory5(Star):
             per_qq = self._int("remind_max_per_qq", 4)
             picked_lines: list[str] = []
             for qq, items in remind_by_qq.items():
-                picked_lines.extend(items[:per_qq])
+                selected = 0
+                for item in items:
+                    if is_dup(item, mark=False):
+                        continue
+                    if selected >= per_qq:
+                        break
+                    is_dup(item, mark=True)
+                    picked_lines.append(item)
+                    selected += 1
             if picked_lines:
                 remind_chunk = "【提醒】\n" + "\n".join(picked_lines)
 
@@ -2407,15 +2537,20 @@ class Memory5(Star):
             fallback.sort(key=lambda e: str(e.get("date", "")), reverse=True)
             matched = fallback[:3]
 
+        # 普通段按 topic 稳定度排序；稳定主题优先，再按日期。
+        matched.sort(key=lambda e: (self._topic_priority(str(e.get("topic", ""))), str(e.get("date", ""))))
+        low.sort(key=lambda e: (self._topic_priority(str(e.get("topic", ""))), str(e.get("date", ""))))
+
         # 普通段有独立预算，不和长期/重要抢
         normal_used = 0
         normal: list[str] = []
         for e in matched:
-            if is_dup(str(e.get("text", ""))):
-                continue
             line = f"- {e['text']}"
+            if is_dup(str(e.get("text", "")), mark=False):
+                continue
             if self.normal_budget > 0 and normal_used + len(line) > self.normal_budget:
                 break
+            is_dup(str(e.get("text", "")), mark=True)
             normal.append(line)
             normal_used += len(line)
         pool = [e for e in rest if e not in matched]
@@ -2423,20 +2558,22 @@ class Memory5(Star):
         pool.sort(key=lambda e: e.get("date", ""), reverse=True)
         picked_random = pool[: self._int("random_min", 2)]
         for e in picked_random:
-            if is_dup(str(e.get("text", ""))):
-                continue
             line = f"- {e['text']}"
+            if is_dup(str(e.get("text", "")), mark=False):
+                continue
             if self.normal_budget > 0 and normal_used + len(line) > self.normal_budget:
                 break
+            is_dup(str(e.get("text", "")), mark=True)
             normal.append(line)
             normal_used += len(line)
         if low:
             for e in low[: self._int("low_max", 1)]:
-                if is_dup(str(e.get("text", ""))):
-                    continue
                 line = f"- {e['text']}"
+                if is_dup(str(e.get("text", "")), mark=False):
+                    continue
                 if self.normal_budget > 0 and normal_used + len(line) > self.normal_budget:
                     break
+                is_dup(str(e.get("text", "")), mark=True)
                 normal.append(line)
                 normal_used += len(line)
         recent_chunk = ("【近期】\n" + "\n".join(normal)) if normal else ""
@@ -3362,7 +3499,7 @@ class Memory5(Star):
             due = parse_dt(str(item.get("due") or ""))
             if due and due - now() > timedelta(days=self._int("remind_max_future_days", 14)):
                 due = None  # 超远期的提醒不记
-            text, hit = desensitize(text[:40], self.blocked_index())
+            text, hit = desensitize(text[:90], self.blocked_index())
             text = absolutize_time(text, due)
             if hit:
                 info = max(0, info - 1)
