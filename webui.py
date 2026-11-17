@@ -471,6 +471,17 @@ class _TasksMixin:
             write_jsonl(path, bucket)
         return moved
 
+    async def export(self):
+        scope = (request.args.get("scope") or "").strip()
+        fmt = (request.args.get("format") or "json").strip().lower()
+        device = (request.args.get("device") or "").strip()[:32]
+        start = (request.args.get("start") or "").strip()
+        end = (request.args.get("end") or "").strip()
+        if not scope:
+            raise ValueError("缺少 scope")
+        data = await asyncio.to_thread(self._export_payload, scope, fmt, device, start, end)
+        return jsonify({"status": "ok", "data": data})
+
     def _export_payload(self, scope: str, fmt: str, device: str, start: str, end: str) -> dict:
         def in_range(day: str) -> bool:
             if start and day < start:
