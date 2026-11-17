@@ -1,8 +1,8 @@
 name: astrbot_plugin_memory5
 display_name: 鱼鱼日记
-short_desc: 修复空 tool_calls 导致的 400 响应错误
-desc: 修复清理工具结果后产生空 tool_calls 导致 LLM 400 响应错误。
-version: v2.7.3
+short_desc: 优化大模型写日记的提示词
+desc: 优化大模型写日记的提示词。
+version: v2.7.4
 author: DSH
 repo: https://github.com/XingMin0371/astrbot_plugin_memory5
 astrbot_version: ">=4.29.0"
