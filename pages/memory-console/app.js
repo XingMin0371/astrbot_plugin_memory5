@@ -1058,6 +1058,25 @@ async function boot() {
     btn.textContent = "删除";
     runBulk("delete", btn);
   };
+  $("migrateTopicsBtn").onclick = async () => {
+    const btn = $("migrateTopicsBtn");
+    if (!btn) return;
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "升级中…";
+    setStatus("正在把旧标签升级为新标签…");
+    try {
+      const res = await apiPost("migrate-topics", {});
+      const data = unwrap(res) || {};
+      setStatus(data.message || (data.changed ? `已迁移 ${data.changed} 个文件` : "没有需要迁移的旧标签"));
+    } catch (err) {
+      setStatus("标签升级失败：" + (err?.message || err));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
+  };
+
   $("selfcheckBtn").onclick = async () => {
     $("selfcheckOut").textContent = "自检中…";
     const res = await apiPost("selfcheck", {});
