@@ -324,12 +324,6 @@ TOPIC_ALIASES = {
 }
 RECALL_WORDS = ("还记得", "记不记得", "记得吗", "以前", "之前", "上次", "那次", "想起来", "回忆", "我说过", "答应过", "最近", "后来", "当时", "现在")
 CORE_ALWAYS_TOPICS = {"身份", "称呼", "关系", "边界", "隐私", "私密", "原则", "性格"}
-CORE_TOPIC_GROUPS = (
-    ("主人", "身份", "称呼", "关系", "权限", "管理员", "群主", "昵称", "伴侣", "相处", "回应", "防钓鱼"),
-    ("底线", "保密", "隐私", "私密", "原则", "边界", "脱敏"),
-    ("归档流程", "查询习惯", "回复规则", "相处观", "图片规则", "记忆", "日记本", "日记", "自我", "价值", "愿望", "纪念", "聊天"),
-)
-CORE_VOLATILE_TOPICS = ("约定", "日记约定", "事件", "喜好", "偏好", "习惯", "作息", "饮食", "担心", "心情", "自由偏好", "日记隐私")
 GENERIC_KEYWORDS = {
     "今天", "昨天", "明天", "现在", "时候", "什么", "怎么", "可以", "一个", "我们", "他们",
     "这个", "那个", "没有", "就是", "还是", "因为", "所以", "如果", "然后", "已经", "自己",
@@ -349,6 +343,7 @@ def scope_dir(scope: str) -> str:
 
 
 VERSION = "2.7.4"
+TOPIC_SCHEMA_VERSION = "2"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
 DEFAULT_HEADER = "【以下是你自己的日记和记忆，不是别人；有的用第三人称写，有的是你的口吻，都是在说你自己】"
@@ -647,15 +642,38 @@ def scope_paths(scope: str) -> dict:
     }
 
 
-def migrate_topics() -> int:
-    """Normalize legacy core/important/remind/daily topics to the new schema.
+def _migrate_topic_value(old_topic: str, unknown: list[str]) -> str:
+    """Map a legacy topic safely; unknown non-empty values fall back to 其他."""
+    old_topic = str(old_topic or "").strip()
+    if not old_topic:
+        return old_topic
+    if old_topic in TOPIC_ORDER:
+        return old_topic
+    mapped = TOPIC_CANON.get(old_topic)
+    if mapped:
+        return mapped
+    unknown.append(old_topic)
+    return "其他"
 
-    Idempotent.  Runs at startup so every installation, not just this one,
-    migrates old topic names without touching entry text or dates.
+
+def migrate_topics(force: bool = False) -> int:
+    """Normalize legacy topics in core/important/remind/daily.
+
+    Startup uses force=False and skips after the schema marker exists.
+    The WebUI button uses force=True so imported legacy data is handled again.
     """
     if not os.path.isdir(MEM_ROOT):
         return 0
+    marker = os.path.join(MEM_ROOT, ".topic_schema.json")
+    if not force:
+        try:
+            state = read_json(marker, {}) or {}
+            if state.get("version") == TOPIC_SCHEMA_VERSION:
+                return 0
+        except Exception:
+            pass
     changed = 0
+    unknown: list[str] = []
     for name in os.listdir(MEM_ROOT):
         if not (name.startswith("group_") or name.startswith("private_")):
             continue
@@ -673,7 +691,7 @@ def migrate_topics() -> int:
                 matched = CORE_LINE_RE.match(line.strip())
                 if matched:
                     old_topic = matched.group("topic")
-                    new_topic = TOPIC_CANON.get(old_topic, old_topic if old_topic in TOPIC_ORDER else "其他")
+                    new_topic = _migrate_topic_value(old_topic, unknown)
                     if new_topic != old_topic:
                         line = line.replace(f"[{old_topic}]", f"[{new_topic}]", 1)
                         local += 1
@@ -691,7 +709,7 @@ def migrate_topics() -> int:
                 if not isinstance(row, dict):
                     continue
                 old_topic = str(row.get("topic", "")).strip()
-                new_topic = TOPIC_CANON.get(old_topic, old_topic if old_topic in TOPIC_ORDER else "其他")
+                new_topic = _migrate_topic_value(old_topic, unknown)
                 if new_topic != old_topic:
                     row["topic"] = new_topic
                     local += 1
@@ -710,13 +728,19 @@ def migrate_topics() -> int:
                     if not isinstance(row, dict):
                         continue
                     old_topic = str(row.get("topic", "")).strip()
-                    new_topic = TOPIC_CANON.get(old_topic, old_topic if old_topic in TOPIC_ORDER else "其他")
+                    new_topic = _migrate_topic_value(old_topic, unknown)
                     if new_topic != old_topic:
                         row["topic"] = new_topic
                         local += 1
                 if local:
                     write_jsonl(path, rows)
                     changed += 1
+    try:
+        write_json(marker, {"version": TOPIC_SCHEMA_VERSION, "ts": time.time()})
+    except Exception:
+        pass
+    if unknown:
+        logger.info(f"memory5: topic 迁移兜底到其他: {', '.join(sorted(set(unknown))[:20])}")
     return changed
 
 
@@ -2014,23 +2038,6 @@ class Memory5(Star):
             return TOPIC_ORDER.index(canonical)
         except ValueError:
             return len(TOPIC_ORDER)
-
-    @staticmethod
-    def _core_priority(topic: str) -> int:
-        # Exact topic first.  Substring matching is only a compatibility
-        # fallback for legacy topics such as 称呼关系/相处观; otherwise new
-        # topics like 相处 would also capture 相处观 and reorder core lines.
-        for idx, group in enumerate(CORE_TOPIC_GROUPS):
-            if topic in group:
-                return idx
-        if topic in CORE_VOLATILE_TOPICS:
-            return 9
-        for idx, group in enumerate(CORE_TOPIC_GROUPS):
-            if any(word in topic for word in group):
-                return idx
-        if any(word in topic for word in CORE_VOLATILE_TOPICS):
-            return 9
-        return 6
 
     @classmethod
     def _core_sort_key(cls, line: str):
@@ -4605,6 +4612,10 @@ class Memory5(Star):
             except OSError as exc:
                 logger.debug(f"memory5: 心跳写入失败 {type(exc).__name__}: {exc}")
 
+    async def run_topic_migration(self) -> int:
+        """Run the topic migration off the event loop; button forces a rescan."""
+        return await asyncio.to_thread(migrate_topics, True)
+
     async def initialize(self) -> None:
         set_timezone(str(self._get("timezone", "北京时间（Asia/Shanghai）")))
         try:
@@ -4628,7 +4639,7 @@ class Memory5(Star):
         except Exception as exc:  # 单个坏文件不能拖垮整个插件
             logger.warning(f"memory5: 加密迁移跳过 {type(exc).__name__}: {exc}")
         try:
-            migrated_topics = migrate_topics()
+            migrated_topics = await asyncio.to_thread(migrate_topics)
             if migrated_topics:
                 logger.info(f"memory5: 已迁移 {migrated_topics} 个文件的旧 topic 到新标签")
         except Exception as exc:  # noqa: BLE001
