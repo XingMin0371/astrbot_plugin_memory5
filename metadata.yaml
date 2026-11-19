@@ -2,7 +2,7 @@ name: astrbot_plugin_memory5
 display_name: 鱼鱼日记
 short_desc: 优化标签迁移、匹配与性能
 desc: 优化标签迁移与记忆匹配，减少阻塞和重复扫描。
-version: v2.7.6
+version: v2.7.7
 author: DSH
 repo: https://github.com/XingMin0371/astrbot_plugin_memory5
 astrbot_version: ">=4.29.0"
