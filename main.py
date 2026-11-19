@@ -342,7 +342,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.7.6"
+VERSION = "2.7.7"
 TOPIC_SCHEMA_VERSION = "2"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
@@ -406,15 +406,25 @@ def _norm_text(text: str) -> str:
     return re.sub(r"[\s，。！？、：；,.!?;:~～·…（）()\[\]【】\"'“”‘’\-—_]", "", str(text or ""))
 
 
-def _similar(a: str, b: str) -> bool:
-    na, nb = _norm_text(a), _norm_text(b)
+def _similar_norm(na: str, nb: str) -> bool:
     if not na or not nb:
         return False
     if na == nb:
         return True
     if len(na) >= 6 and len(nb) >= 6 and (na in nb or nb in na):
         return True
-    return difflib.SequenceMatcher(None, na, nb).ratio() >= 0.68
+    # Upper bound on SequenceMatcher.ratio(); skip impossible pairs early.
+    shorter, longer = (len(na), len(nb)) if len(na) <= len(nb) else (len(nb), len(na))
+    if 2.0 * shorter / (shorter + longer) < 0.68:
+        return False
+    sm = difflib.SequenceMatcher(None, na, nb)
+    if sm.real_quick_ratio() < 0.68 or sm.quick_ratio() < 0.68:
+        return False
+    return sm.ratio() >= 0.68
+
+
+def _similar(a: str, b: str) -> bool:
+    return _similar_norm(_norm_text(a), _norm_text(b))
 
 
 def renumber_scope(scope: str) -> int:
@@ -514,19 +524,32 @@ def dedupe_scope(scope: str, dry_run: bool = False) -> list[dict]:
                 "text": str(row.get("text", "")), "row": row,
             })
 
+    for entry in entries:
+        entry["norm"] = _norm_text(entry["text"])
     entries.sort(key=lambda e: DEDUP_RANK.get(e["tier"], 0), reverse=True)
     winners: list[dict] = []
     winners_by_subject: dict[str, list[dict]] = {}
     dropped: list[dict] = []
+    winners_norm = {}
     for entry in entries:
         conflict = None
         subject = str(entry["subject"])
-        for keep in winners_by_subject.get(subject, []):
-            if {entry["tier"], keep["tier"]} == {"core", "remind"}:
-                continue  # 长期和提醒是两种用途，都留
-            if _similar(entry["text"], keep["text"]):
-                conflict = keep
-                break
+        entry_norm = entry["norm"]
+        if entry_norm in winners_norm.get(subject, set()):
+            for keep in winners_by_subject.get(subject, []):
+                if keep["norm"] == entry_norm and {entry["tier"], keep["tier"]} != {"core", "remind"}:
+                    conflict = keep
+                    break
+        if conflict is None:
+            for keep in winners_by_subject.get(subject, []):
+                if keep["norm"] == entry_norm:
+                    if {entry["tier"], keep["tier"]} == {"core", "remind"}:
+                        continue
+                if {entry["tier"], keep["tier"]} == {"core", "remind"}:
+                    continue  # 长期和提醒是两种用途，都留
+                if _similar_norm(entry_norm, keep["norm"]):
+                    conflict = keep
+                    break
         if conflict and entry["tier"] != "remind":
             dropped.append({
                 "tier": entry["tier"], "subject": entry["subject"],
@@ -535,6 +558,7 @@ def dedupe_scope(scope: str, dry_run: bool = False) -> list[dict]:
             continue
         winners.append(entry)
         winners_by_subject.setdefault(subject, []).append(entry)
+        winners_norm.setdefault(subject, set()).add(entry_norm)
 
     if dry_run:
         return dropped
@@ -1541,7 +1565,9 @@ class Memory5(Star):
             "本条@对象：" + (", ".join(other_targets) if other_targets else "无"),
             "本条是否回复其他人：" + ("是" if other_replies else "否"),
             "说明：这是群聊上下文，不一定是在对鱼鱼说。先判断它是否与鱼鱼有关：",
-            "- 如果是在跟别人对话，或明显以别人为主体：不要抢答，不要把事件写成发生在鱼鱼身上。",
+            ("- 本条是在回复其他人。可以以旁观者身份轻轻接一句，但不要抢答、不要替发送者或被@者叙述，也不要把事件写成发生在鱼鱼身上。"
+             if other_replies else
+             "- 如果是在跟别人对话，或明显以别人为主体：不要抢答，不要把事件写成发生在鱼鱼身上。"),
             "- 如果没有直接点名，但话题与鱼鱼有关：可以以旁观者身份接一句，不要替发送者或被@者叙述。",
             "- 不确定时宁可少说，不要默认自己就是事件主体。",
             "消息：",
@@ -1712,9 +1738,14 @@ class Memory5(Star):
                     return
                 other_targets = batch_other_targets
                 if batch_other_reply_targets:
-                    self._gate_log(scope, sender, False, 0, 0.0, "drop", "reply_other", len(text))
-                    event.should_call_llm(False)
-                    return
+                    allow_other = bool(self._get("gate_reply_other_enabled", False))
+                    base = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
+                    reply_other_probability = min(2.0 * base, 0.33)
+                    if not (allow_other and random.random() < reply_other_probability):
+                        self._gate_log(scope, sender, False, 0, 0.0, "drop", "reply_other", len(text))
+                        event.should_call_llm(False)
+                        return
+                    self._gate_log(scope, sender, False, 0, 0.0, "allow", "reply_other_ambient", len(text))
                 ambient_meta = {
                     "sender": sender,
                     "sender_name": batch_sender_name or "群友",
