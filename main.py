@@ -1748,12 +1748,6 @@ class Memory5(Star):
                     event.message_str = self._promote_cold(scope, text)
                     return
                 other_targets = batch_other_targets
-                if batch_other_reply_targets:
-                    base = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
-                    if not (bool(self._get("gate_random_reply_enabled", False)) and random.random() < base):
-                        self._gate_log(scope, sender, False, 0, 0.0, "drop", "reply_other", len(text))
-                        event.should_call_llm(False)
-                        return
                 ambient_meta = {
                     "sender": sender,
                     "sender_name": batch_sender_name or "群友",
@@ -1761,6 +1755,24 @@ class Memory5(Star):
                     "other_targets": batch_other_targets,
                     "other_reply_targets": batch_other_reply_targets,
                 }
+                # One message gets one precedence path. Explicit @other wins.
+                if batch_other_targets:
+                    self._gate_log(scope, sender, False, 0, 0.0, "drop", "other_target", len(text))
+                    event.should_call_llm(False)
+                    return
+                # Reply-to-other is a single probabilistic decision: allow now
+                # or drop now. Do not fall through to attention/random again.
+                if batch_other_reply_targets:
+                    base = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
+                    if not (bool(self._get("gate_random_reply_enabled", False)) and random.random() < base):
+                        self._gate_log(scope, sender, False, 0, 0.0, "drop", "reply_other", len(text))
+                        event.should_call_llm(False)
+                        return
+                    self._gate_log(scope, sender, False, 0, 0.0, "allow", "reply_other_ambient", len(text))
+                    event.message_str = self._promote_cold(scope, text)
+                    event.should_call_llm(False)
+                    yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
+                    return
                 if has_media and not text:
                     probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
                     cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 120, 0))
