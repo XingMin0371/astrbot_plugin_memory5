@@ -1760,18 +1760,39 @@ class Memory5(Star):
                     self._gate_log(scope, sender, False, 0, 0.0, "drop", "other_target", len(text))
                     event.should_call_llm(False)
                     return
-                # Reply-to-other is a single probabilistic decision: allow now
-                # or drop now. Do not fall through to attention/random again.
+                # Reply-to-other still belongs to normal group attention.
+                # One final decision: attention hit -> allow; otherwise one
+                # low-frequency random roll -> allow/drop. No second pipeline.
                 if batch_other_reply_targets:
-                    base = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
-                    if not (bool(self._get("gate_random_reply_enabled", False)) and random.random() < base):
-                        self._gate_log(scope, sender, False, 0, 0.0, "drop", "reply_other", len(text))
+                    now = time.time()
+                    decay = max(30, self._int("gate_attention_decay_seconds", 360, 30))
+                    state = self._attention.setdefault(scope, {})
+                    old_last, old_value = state.get(sender, (0.0, 0.0))
+                    attention_value = old_value * math.exp(-max(0.0, now - old_last) / decay)
+                    attention_hit = (
+                        attention_value >= self._float_cfg("gate_attention_threshold", 4.6)
+                        and bool(self._get("gate_attention_reply_enabled", True))
+                    )
+                    state[sender] = (now, min(10.0, attention_value + self._attention_increment(0)))
+                    cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 120, 0))
+                    cooldown_ok = now - self._ambient_last.get(ambient_key, 0) >= cooldown
+                    if attention_hit and cooldown_ok:
+                        self._gate_log(scope, sender, False, 0, attention_value, "allow", "reply_other_attention", len(text))
+                        self._ambient_last[ambient_key] = now
+                        event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
+                        yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
                         return
-                    self._gate_log(scope, sender, False, 0, 0.0, "allow", "reply_other_ambient", len(text))
-                    event.message_str = self._promote_cold(scope, text)
+                    base = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
+                    if bool(self._get("gate_random_reply_enabled", False)) and random.random() < base:
+                        self._gate_log(scope, sender, False, 0, attention_value, "allow", "reply_other_ambient", len(text))
+                        self._ambient_last[ambient_key] = now
+                        event.message_str = self._promote_cold(scope, text)
+                        event.should_call_llm(False)
+                        yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
+                        return
+                    self._gate_log(scope, sender, False, 0, attention_value, "drop", "reply_other", len(text))
                     event.should_call_llm(False)
-                    yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
                     return
                 if has_media and not text:
                     probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
