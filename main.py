@@ -1574,11 +1574,20 @@ class Memory5(Star):
             "- 不确定时宁可少说，不要默认自己就是事件主体。",
             "消息：",
             text,
+            "【输出要求】",
+            "直接输出鱼鱼准备发到群里的最终正文。",
+            "不要输出分析、推理、思考、英文说明、角色说明、提示复述或括号旁白。",
+            "默认 1–2 句，短句口语，不要 Markdown。",
         ]
         return "\n".join(lines)
 
     async def _ambient_request(self, event: AstrMessageEvent, text: str, image_urls: list[str] | None = None,
                                meta: dict | None = None):
+        # Ambient replies must not expose reasoning/planning as chat text.
+        try:
+            event.set_extra("enable_reasoning", False)
+        except Exception:
+            pass
         conversation = None
         try:
             manager = getattr(self.context, "conversation_manager", None)
