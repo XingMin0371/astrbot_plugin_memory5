@@ -558,6 +558,13 @@
         "type": "float",
         "default": 0.02
       },
+
+      "gate_reply_other_enabled": {
+        "description": "是否接入群友回复别人的消息",
+        "hint": "开启后，回复别人时按 min(2×随机回复概率, 0.33) 从旁观者角度低频接话；@别人仍不抢答。不新增概率设置。",
+        "type": "bool",
+        "default": false
+      },
       "gate_ambient_reply_probability": {
         "description": "相关话题主动回复概率",
         "hint": "没有叫名字时，相关提问/图片获得主动请求的概率；默认 0.15。",
