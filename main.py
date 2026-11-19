@@ -1783,14 +1783,8 @@ class Memory5(Star):
                         event.should_call_llm(False)
                         yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
                         return
-                    base = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
-                    if bool(self._get("gate_random_reply_enabled", False)) and random.random() < base:
-                        self._gate_log(scope, sender, False, 0, attention_value, "allow", "reply_other_ambient", len(text))
-                        self._ambient_last[ambient_key] = now
-                        event.message_str = self._promote_cold(scope, text)
-                        event.should_call_llm(False)
-                        yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
-                        return
+                    # Reply-to-other is attention-only; low-frequency random
+                    # is reserved for ordinary messages.
                     self._gate_log(scope, sender, False, 0, attention_value, "drop", "reply_other", len(text))
                     event.should_call_llm(False)
                     return
