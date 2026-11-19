@@ -342,7 +342,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.7.7"
+VERSION = "2.7.6"
 TOPIC_SCHEMA_VERSION = "2"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
@@ -1233,6 +1233,8 @@ class Memory5(Star):
         self._gate_seq: dict[tuple[str, str], int] = {}
         self._gate_log_buffer: list[tuple[str, str]] = []
         self._gate_log_last_flush = 0.0
+        self._gate_log_lock = threading.Lock()
+        self._gate_log_task: asyncio.Task | None = None
         self._gate_tasks: dict[tuple[str, str], object] = {}
         self._attention: dict[str, dict[str, tuple[float, float]]] = {}
         self._cold_cache: dict[str, deque] = {}
@@ -1615,22 +1617,31 @@ class Memory5(Star):
                 "reason": reason,
                 "text_len": int(text_len),
             }
-            self._gate_log_buffer.append((now.strftime("%Y-%m-%d"), json.dumps(row, ensure_ascii=False)))
-            if len(self._gate_log_buffer) >= 20 or time.time() - self._gate_log_last_flush >= 2.0:
-                self._flush_gate_log()
+            with self._gate_log_lock:
+                self._gate_log_buffer.append((now.strftime("%Y-%m-%d"), json.dumps(row, ensure_ascii=False)))
+                due = len(self._gate_log_buffer) >= 20 or time.time() - self._gate_log_last_flush >= 2.0
+            if due and (self._gate_log_task is None or self._gate_log_task.done()):
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    self._flush_gate_log()
+                else:
+                    self._gate_log_task = loop.create_task(asyncio.to_thread(self._flush_gate_log))
         except Exception as exc:  # logging must never break the gate
             logger.debug(f"memory5: gate log skipped ({type(exc).__name__}: {exc})")
 
     def _flush_gate_log(self) -> None:
-        if not self._gate_log_buffer:
-            return
+        with self._gate_log_lock:
+            if not self._gate_log_buffer:
+                return
+            batch = self._gate_log_buffer
+            self._gate_log_buffer = []
         try:
             log_dir = os.path.join(DATA_DIR, "plugin_data", "astrbot_plugin_memory5", "gate_logs")
             os.makedirs(log_dir, exist_ok=True)
             groups: dict[str, list[str]] = {}
-            for day, line in self._gate_log_buffer:
+            for day, line in batch:
                 groups.setdefault(day, []).append(line)
-            self._gate_log_buffer.clear()
             for day, lines in groups.items():
                 path = os.path.join(log_dir, day + ".jsonl")
                 with open(path, "a", encoding="utf-8") as fh:
@@ -1745,7 +1756,6 @@ class Memory5(Star):
                         self._gate_log(scope, sender, False, 0, 0.0, "drop", "reply_other", len(text))
                         event.should_call_llm(False)
                         return
-                    self._gate_log(scope, sender, False, 0, 0.0, "allow", "reply_other_ambient", len(text))
                 ambient_meta = {
                     "sender": sender,
                     "sender_name": batch_sender_name or "群友",
