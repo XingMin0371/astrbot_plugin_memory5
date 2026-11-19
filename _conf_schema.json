@@ -548,7 +548,7 @@
       },
       "gate_random_reply_enabled": {
         "description": "低频随机回复",
-        "hint": "默认关闭；开启后普通群聊有概率进入主模型。请关闭 AstrBot 自带的概率回复，避免双重触发。",
+        "hint": "默认关闭；开启后普通群聊和群友回复别人的消息都按同一概率进入主模型。请关闭 AstrBot 自带的概率回复，避免双重触发。",
         "type": "bool",
         "default": false
       },
@@ -557,13 +557,6 @@
         "hint": "0–1，默认 0.02；建议低频，按群活跃度调整。",
         "type": "float",
         "default": 0.02
-      },
-
-      "gate_reply_other_enabled": {
-        "description": "是否介入群友回复别人的消息",
-        "hint": "开启后，回复别人时按 min(2×随机回复概率, 0.33) 从旁观者角度低频接话；@别人仍不抢答。不新增概率设置。",
-        "type": "bool",
-        "default": false
       },
       "gate_ambient_reply_probability": {
         "description": "相关话题主动回复概率",
