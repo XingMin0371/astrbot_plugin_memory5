@@ -1749,10 +1749,8 @@ class Memory5(Star):
                     return
                 other_targets = batch_other_targets
                 if batch_other_reply_targets:
-                    allow_other = bool(self._get("gate_reply_other_enabled", False))
                     base = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
-                    reply_other_probability = min(2.0 * base, 0.33)
-                    if not (allow_other and random.random() < reply_other_probability):
+                    if not (bool(self._get("gate_random_reply_enabled", False)) and random.random() < base):
                         self._gate_log(scope, sender, False, 0, 0.0, "drop", "reply_other", len(text))
                         event.should_call_llm(False)
                         return
