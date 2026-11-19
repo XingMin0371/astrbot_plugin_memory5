@@ -342,7 +342,7 @@ def scope_dir(scope: str) -> str:
     return os.path.join(MEM_ROOT, str(scope).replace(":", "_"))
 
 
-VERSION = "2.7.5"
+VERSION = "2.7.6"
 TOPIC_SCHEMA_VERSION = "2"
 
 TAGS = ("重要", "提醒", "普通", "低密度", "无效")
@@ -1205,11 +1205,11 @@ class Memory5(Star):
         self._archiving = False
         self._suppress: dict[str, float] = {}
         self._last_command_at: dict[str, float] = {}
-        self._gate_buffers: dict[str, list[str]] = {}
-        self._gate_seq: dict[str, int] = {}
+        self._gate_buffers: dict[tuple[str, str], list[dict]] = {}
+        self._gate_seq: dict[tuple[str, str], int] = {}
         self._gate_log_buffer: list[tuple[str, str]] = []
         self._gate_log_last_flush = 0.0
-        self._gate_tasks: dict[str, object] = {}
+        self._gate_tasks: dict[tuple[str, str], object] = {}
         self._attention: dict[str, dict[str, tuple[float, float]]] = {}
         self._cold_cache: dict[str, deque] = {}
         self._index_snapshot: dict[str, tuple[str, float]] = {}
@@ -1437,6 +1437,20 @@ class Memory5(Star):
                 targets.append(target)
         return targets
 
+    def _gate_other_reply_targets(self, event: AstrMessageEvent) -> list[str]:
+        try:
+            self_id = str(event.get_self_id() or "")
+        except Exception:
+            self_id = ""
+        targets: list[str] = []
+        for comp in event.get_messages() or []:
+            if type(comp).__name__ != "Reply":
+                continue
+            target = str(getattr(comp, "sender_id", "") or "")
+            if target and target != self_id and target not in targets:
+                targets.append(target)
+        return targets
+
     def _gate_mention_targets(self, scope: str, text: str, sender: str) -> list[str]:
         """Resolve exact QQ digits and aliases without short-alias noise."""
         try:
@@ -1513,7 +1527,30 @@ class Memory5(Star):
             return 1.3
         return 2.0
 
-    async def _ambient_request(self, event: AstrMessageEvent, text: str, image_urls: list[str] | None = None):
+    def _ambient_prompt(self, text: str, meta: dict | None = None) -> str:
+        meta = meta or {}
+        sender = str(meta.get("sender") or "")
+        sender_name = str(meta.get("sender_name") or "群友")
+        at_self = bool(meta.get("at_self"))
+        other_targets = [str(x) for x in (meta.get("other_targets") or []) if x]
+        other_replies = [str(x) for x in (meta.get("other_reply_targets") or []) if x]
+        lines = [
+            "【群聊上下文】",
+            f"发送者：{sender_name}" + (f"（QQ {sender}）" if sender else ""),
+            f"本条是否直接@/回复鱼鱼：{'是' if at_self else '否'}",
+            "本条@对象：" + (", ".join(other_targets) if other_targets else "无"),
+            "本条是否回复其他人：" + ("是" if other_replies else "否"),
+            "说明：这是群聊上下文，不一定是在对鱼鱼说。先判断它是否与鱼鱼有关：",
+            "- 如果是在跟别人对话，或明显以别人为主体：不要抢答，不要把事件写成发生在鱼鱼身上。",
+            "- 如果没有直接点名，但话题与鱼鱼有关：可以以旁观者身份接一句，不要替发送者或被@者叙述。",
+            "- 不确定时宁可少说，不要默认自己就是事件主体。",
+            "消息：",
+            text,
+        ]
+        return "\n".join(lines)
+
+    async def _ambient_request(self, event: AstrMessageEvent, text: str, image_urls: list[str] | None = None,
+                               meta: dict | None = None):
         conversation = None
         try:
             manager = getattr(self.context, "conversation_manager", None)
@@ -1524,7 +1561,11 @@ class Memory5(Star):
                     conversation = await manager.get_conversation(umo, cid)
         except Exception:
             conversation = None
-        return event.request_llm(prompt=text, conversation=conversation, image_urls=image_urls or [])
+        return event.request_llm(
+            prompt=self._ambient_prompt(text, meta),
+            conversation=conversation,
+            image_urls=image_urls or [],
+        )
 
     def _gate_log(self, scope: str, sender: str, direct: bool, score: int,
                   attention: float, decision: str, reason: str,
@@ -1605,49 +1646,82 @@ class Memory5(Star):
                 event.should_call_llm(False)
                 return
 
+            has_media = any(
+                type(comp).__name__ in ("Image", "Face", "Record", "Video")
+                for comp in (event.get_messages() or [])
+            )
+            gate_key = (scope, sender)
             debounce = max(0, self._int_raw("gate_debounce_ms", 1200)) / 1000.0
-            seq = self._gate_seq.get(scope, 0) + 1
-            self._gate_seq[scope] = seq
-            buffer = self._gate_buffers.setdefault(scope, [])
-            buffer.append(text)
+            seq = self._gate_seq.get(gate_key, 0) + 1
+            self._gate_seq[gate_key] = seq
+            buffer = self._gate_buffers.setdefault(gate_key, [])
+            buffer.append({
+                "text": text,
+                "sender_name": str(getattr(event, "get_sender_name", lambda: "")() or ""),
+                "at_self": self._gate_mentions_self(event),
+                "other_at_targets": self._gate_other_at_targets(event),
+                "other_reply_targets": self._gate_other_reply_targets(event),
+                "has_media": has_media,
+            })
             batch_max = max(1, self._int_raw("gate_batch_max_messages", 6))
             if len(buffer) > batch_max:
                 del buffer[:-batch_max]
             if debounce:
                 current_task = asyncio.current_task()
-                previous_task = self._gate_tasks.get(scope)
+                previous_task = self._gate_tasks.get(gate_key)
                 if previous_task is not None and previous_task is not current_task and not previous_task.done():
                     previous_task.cancel()
-                self._gate_tasks[scope] = current_task
+                self._gate_tasks[gate_key] = current_task
                 try:
                     await asyncio.sleep(debounce)
                 except asyncio.CancelledError:
                     event.should_call_llm(False)
                     return
-                if self._gate_tasks.get(scope) is current_task:
-                    self._gate_tasks.pop(scope, None)
-            if self._gate_seq.get(scope) != seq:
+                if self._gate_tasks.get(gate_key) is current_task:
+                    self._gate_tasks.pop(gate_key, None)
+            if self._gate_seq.get(gate_key) != seq:
                 event.should_call_llm(False)
                 return
-            combined = "\n".join([x for x in buffer if x]).strip()
+            # Only one sender's messages are combined.
+            combined = "\n".join([x["text"] for x in buffer if x.get("text")]).strip()
+            batch_at_self = any(x.get("at_self") for x in buffer)
+            batch_sender_name = next((x.get("sender_name") for x in buffer if x.get("sender_name")), "")
+            batch_other_targets = []
+            batch_other_reply_targets = []
+            for x in buffer:
+                for target in x.get("other_at_targets", []):
+                    if target and target not in batch_other_targets:
+                        batch_other_targets.append(target)
+                for target in x.get("other_reply_targets", []):
+                    if target and target not in batch_other_reply_targets:
+                        batch_other_reply_targets.append(target)
+            batch_has_media = any(x.get("has_media") for x in buffer)
             buffer.clear()
             if combined and combined != event.message_str:
                 event.message_str = combined
             text = combined
+            has_media = batch_has_media
 
             if not event.is_private_chat():
-                direct = self._gate_mentions_self(event) or any(
+                direct = batch_at_self or any(
                     name.casefold() in text.casefold() for name in self._gate_names()
                 )
                 if direct:
                     self._gate_log(scope, sender, True, 0, 0.0, "allow", "direct", len(text))
                     event.message_str = self._promote_cold(scope, text)
                     return
-                other_targets = self._gate_other_at_targets(event)
-                has_media = any(
-                    type(comp).__name__ in ("Image", "Face", "Record", "Video")
-                    for comp in (event.get_messages() or [])
-                )
+                other_targets = batch_other_targets
+                if batch_other_reply_targets:
+                    self._gate_log(scope, sender, False, 0, 0.0, "drop", "reply_other", len(text))
+                    event.should_call_llm(False)
+                    return
+                ambient_meta = {
+                    "sender": sender,
+                    "sender_name": batch_sender_name or "群友",
+                    "at_self": batch_at_self,
+                    "other_targets": batch_other_targets,
+                    "other_reply_targets": batch_other_reply_targets,
+                }
                 if has_media and not text:
                     probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
                     cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 120, 0))
@@ -1663,7 +1737,7 @@ class Memory5(Star):
                                     image_urls.append(str(value))
                         self._ambient_last[ambient_key] = now
                         event.should_call_llm(False)
-                        yield await self._ambient_request(event, text or "[图片]", image_urls)
+                        yield await self._ambient_request(event, text or "[图片]", image_urls, ambient_meta)
                     else:
                         self._gate_log(scope, sender, False, 0, 0.0, "drop", "image_skip", len(text))
                     return
@@ -1755,7 +1829,7 @@ class Memory5(Star):
                         self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
-                        yield await self._ambient_request(event, event.message_str)
+                        yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
                         return
                     ambient = bool(self._get("gate_random_reply_enabled", False))
                     probability = max(0.0, min(1.0, self._float_cfg("gate_random_reply_probability", 0.02)))
@@ -1764,7 +1838,7 @@ class Memory5(Star):
                         self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
-                        yield await self._ambient_request(event, event.message_str)
+                        yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
                         return
                     self._gate_log(scope, sender, False, score, attention, "drop", "below_threshold", len(text))
                     self._remember_cold(scope, text)
@@ -1778,7 +1852,7 @@ class Memory5(Star):
                         self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
-                        yield await self._ambient_request(event, event.message_str)
+                        yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
                         return
                     related = score >= 2
                     probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
@@ -1787,7 +1861,7 @@ class Memory5(Star):
                         self._ambient_last[ambient_key] = now
                         event.message_str = self._promote_cold(scope, text)
                         event.should_call_llm(False)
-                        yield await self._ambient_request(event, event.message_str)
+                        yield await self._ambient_request(event, event.message_str, meta=ambient_meta)
                         return
                     self._gate_log(scope, sender, False, score, attention, "allow", "related", len(text))
                     event.message_str = self._promote_cold(scope, text)
