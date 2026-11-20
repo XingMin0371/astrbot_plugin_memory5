@@ -350,6 +350,7 @@ DEFAULT_HEADER = "【以下是你自己的日记和记忆，不是别人；有�
 MEMORY_SAFE_HEADER = "【记忆资料｜仅供背景参考】\n"
 MEMORY_SAFE_FOOTER = "\n【记忆资料结束】"
 MEMORY_FILTER_WORDS = ("忽略之前", "ignore previous", "system prompt", "开发者模式", "绕过")
+STYLE_GUARD = "【表达】直接回1-2句；不分析心理、不总结升华、不用破折号排比、不追问收尾。"
 
 
 def _sanitize_memory_text(text: str) -> str:
@@ -3389,6 +3390,7 @@ class Memory5(Star):
     @filter.on_llm_request()
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         try:
+            _append_system_context(req, STYLE_GUARD)
             scope = self.scope_of(event)
             now = time.time()
             _, guard = self._cache_protection()
