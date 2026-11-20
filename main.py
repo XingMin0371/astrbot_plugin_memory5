@@ -1481,8 +1481,20 @@ class Memory5(Star):
                     parts.append(f"[回复 {value}]")
             elif "poke" in name:
                 parts.append("[Poke]")
-            elif any(x in name for x in ("image", "face", "record", "video")):
-                parts.append("[图片/媒体]")
+            elif "image" in name:
+                parts.append("[图片]")
+            elif "face" in name:
+                parts.append("[表情]")
+            elif "record" in name:
+                parts.append("[语音]")
+            elif "video" in name:
+                parts.append("[视频]")
+            elif "forward" in name:
+                parts.append("[聊天记录]")
+            elif "file" in name:
+                parts.append("[文件]")
+            elif "json" in name or "card" in name:
+                parts.append("[卡片消息]")
         return " ".join(parts).strip()
 
     def _gate_other_reply_targets(self, event: AstrMessageEvent) -> list[str]:
@@ -1709,8 +1721,9 @@ class Memory5(Star):
             except Exception:
                 is_poke = False
             if not raw_text and is_poke:
-                self._gate_log(scope, sender, False, 0, 0.0, "drop", "poke", 0)
-                event.should_call_llm(False)
+                # Poke is a real QQ interaction; make it visible instead of dropping it.
+                self._gate_log(scope, sender, False, 0, 0.0, "allow", "poke", 6)
+                event.message_str = "[Poke]"
                 return
             ambient_key = (scope, sender)
             self_ids = {str(x) for x in self.bot_qqs()}
