@@ -1463,6 +1463,28 @@ class Memory5(Star):
                 targets.append(target)
         return targets
 
+    def _gate_component_text(self, event: AstrMessageEvent) -> str:
+        parts: list[str] = []
+        for comp in event.get_messages() or []:
+            name = type(comp).__name__.lower()
+            if name == "plain":
+                value = str(getattr(comp, "text", "") or "")
+                if value:
+                    parts.append(value)
+            elif name == "at":
+                value = str(getattr(comp, "qq", "") or getattr(comp, "target", "") or "")
+                if value:
+                    parts.append(f"@{value}")
+            elif name == "reply":
+                value = str(getattr(comp, "sender_id", "") or "")
+                if value:
+                    parts.append(f"[回复 {value}]")
+            elif "poke" in name:
+                parts.append("[Poke]")
+            elif any(x in name for x in ("image", "face", "record", "video")):
+                parts.append("[图片/媒体]")
+        return " ".join(parts).strip()
+
     def _gate_other_reply_targets(self, event: AstrMessageEvent) -> list[str]:
         try:
             self_id = str(event.get_self_id() or "")
@@ -1678,8 +1700,18 @@ class Memory5(Star):
             scope = self.scope_of(event)
             if not scope or scope not in self.scopes:
                 return
-            text = (event.message_str or "").strip()
+            raw_text = (event.message_str or "").strip()
+            text = raw_text or self._gate_component_text(event)
             sender = str(event.get_sender_id())
+            # Poke / 拍一拍 has no message_str; never turn it into an empty prompt.
+            try:
+                is_poke = any("Poke" in type(comp).__name__ for comp in (event.get_messages() or []))
+            except Exception:
+                is_poke = False
+            if not raw_text and is_poke:
+                self._gate_log(scope, sender, False, 0, 0.0, "drop", "poke", 0)
+                event.should_call_llm(False)
+                return
             ambient_key = (scope, sender)
             self_ids = {str(x) for x in self.bot_qqs()}
             if sender in self_ids:
@@ -1747,6 +1779,11 @@ class Memory5(Star):
                 event.message_str = combined
             text = combined
             has_media = batch_has_media
+
+            if not text and not has_media:
+                self._gate_log(scope, sender, False, 0, 0.0, "drop", "empty_message", 0)
+                event.should_call_llm(False)
+                return
 
             if not event.is_private_chat():
                 direct = batch_at_self or any(
