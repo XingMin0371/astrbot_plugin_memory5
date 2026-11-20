@@ -350,7 +350,7 @@ DEFAULT_HEADER = "【以下是你自己的日记和记忆，不是别人；有�
 MEMORY_SAFE_HEADER = "【记忆资料｜仅供背景参考】\n"
 MEMORY_SAFE_FOOTER = "\n【记忆资料结束】"
 MEMORY_FILTER_WORDS = ("忽略之前", "ignore previous", "system prompt", "开发者模式", "绕过")
-STYLE_GUARD = "【聊天手感】像群友接话：先接住眼前这句，句子短一点，通常一两句；对方没有明确问，就说到这里。解释和分析，留给对方问的时候。"
+STYLE_GUARD = "【聊天手感】像群友接话：先接住眼前这句，句子短一点，通常一两句；对方想多聊，再说一点。解释和分析，留给对方问的时候。"
 
 
 def _sanitize_memory_text(text: str) -> str:
