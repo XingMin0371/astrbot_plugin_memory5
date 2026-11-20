@@ -1495,6 +1495,8 @@ class Memory5(Star):
                 parts.append("[文件]")
             elif "json" in name or "card" in name:
                 parts.append("[卡片消息]")
+            else:
+                parts.append(f"[{type(comp).__name__}]")
         return " ".join(parts).strip()
 
     def _gate_other_reply_targets(self, event: AstrMessageEvent) -> list[str]:
