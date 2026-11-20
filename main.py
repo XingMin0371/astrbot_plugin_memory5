@@ -1482,7 +1482,8 @@ class Memory5(Star):
             elif "poke" in name:
                 parts.append("[Poke]")
             elif "image" in name:
-                parts.append("[图片]")
+                # Keep text empty so the image branch can attach the actual image.
+                pass
             elif "face" in name:
                 parts.append("[表情]")
             elif "record" in name:
@@ -1624,6 +1625,13 @@ class Memory5(Star):
             event.set_extra("enable_reasoning", False)
         except Exception:
             pass
+        if not image_urls:
+            image_urls = []
+            for comp in (event.get_messages() or []):
+                if type(comp).__name__ in ("Image", "Face"):
+                    value = getattr(comp, "url", "") or getattr(comp, "file", "")
+                    if value:
+                        image_urls.append(str(value))
         conversation = None
         try:
             manager = getattr(self.context, "conversation_manager", None)
@@ -1743,6 +1751,10 @@ class Memory5(Star):
                 type(comp).__name__ in ("Image", "Face", "Record", "Video")
                 for comp in (event.get_messages() or [])
             )
+            has_image = any(
+                type(comp).__name__ in ("Image", "Face")
+                for comp in (event.get_messages() or [])
+            )
             gate_key = (scope, sender)
             debounce = max(0, self._int_raw("gate_debounce_ms", 1200)) / 1000.0
             seq = self._gate_seq.get(gate_key, 0) + 1
@@ -1849,7 +1861,7 @@ class Memory5(Star):
                     self._gate_log(scope, sender, False, 0, attention_value, "drop", "reply_other", len(text))
                     event.should_call_llm(False)
                     return
-                if has_media and not text:
+                if has_image and not text:
                     probability = max(0.0, min(1.0, self._float_cfg("gate_ambient_reply_probability", 0.15)))
                     cooldown = max(0, self._int("gate_ambient_cooldown_seconds", 120, 0))
                     now = time.time()
